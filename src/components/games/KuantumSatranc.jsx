@@ -206,13 +206,13 @@ const PST = {
   ]
 };
 
-function evaluateAiMove(fr, fc, tr, tc, curBoard, cr, lastMove, shieldedSquares, frozenPieces, aiColor='b') {
+function evaluateAiMove(fr, fc, tr, tc, curBoard, cr, lastMove, shieldedSquares = {}, frozenPieces = {}, aiColor='b') {
   const oppColor = aiColor === 'w' ? 'b' : 'w';
   const mp = curBoard[fr][fc];
   const tp = curBoard[tr][tc];
   const mType = mp[1];
   const targetKey = `${tr}-${tc}`;
-  const isTargetShielded = shieldedSquares && shieldedSquares.has(targetKey);
+  const isTargetShielded = Boolean(shieldedSquares && (shieldedSquares[targetKey] > 0 || (shieldedSquares.has && shieldedSquares.has(targetKey))));
 
   const nextBoard = applyMove(fr, fc, tr, tc, curBoard);
 
@@ -327,7 +327,7 @@ function evaluateAiMove(fr, fc, tr, tc, curBoard, cr, lastMove, shieldedSquares,
   return score;
 }
 
-function pickAiMove(pBoard, chaos, queenBanned, lastMove, cr, shieldedSquares = new Set(), frozenPieces = {}, aiColor = 'b') {
+function pickAiMove(pBoard, chaos, queenBanned, lastMove, cr, shieldedSquares = {}, frozenPieces = {}, aiColor = 'b') {
   const moves = [];
   for (let r = 0; r < 8; r++) {
     for (let c = 0; c < 8; c++) {
@@ -362,7 +362,7 @@ const RULE_OPTIONS=[
 
 const SPELLS=[
   {id:'ADD_TIME',label:'⏱️ +10sn',cost:1,color:'#10b981'},
-  {id:'SHIELD',label:'🛡️ Kalkan',cost:1,color:'#f97316'},
+  {id:'SHIELD',label:'🛡️ Kalkan (1T)',cost:1,color:'#f97316'},
   {id:'FREEZE',label:'❄️ Dondur',cost:1,color:'#64748b'},
   {id:'TELEPORT',label:'🌀 Işınla',cost:2,color:'#a855f7'},
   {id:'ASCEND',label:"♕ Vezir'e",cost:2,color:'#fbbf24'},
@@ -394,7 +394,7 @@ export default function KuantumSatranc({onGameComplete}){
   const[pendingPromotion,setPendingPromotion]=useState(null);
   const[isWhiteInCheck,setIsWhiteInCheck]=useState(false);
   const[isBlackInCheck,setIsBlackInCheck]=useState(false);
-  const[shieldedSquares,setShieldedSquares]=useState(new Set());
+  const[shieldedSquares,setShieldedSquares]=useState({});
   const[aiStunnedTurns,setAiStunnedTurns]=useState(0);
   const[activeRules,setActiveRules]=useState({});
   const[showRuleModal,setShowRuleModal]=useState(false);
@@ -466,7 +466,7 @@ export default function KuantumSatranc({onGameComplete}){
     setFrozenPieces({});
     setActiveSpell(null);
     setIsWhiteInCheck(false);setIsBlackInCheck(false);
-    setShieldedSquares(new Set());setAiStunnedTurns(0);setActiveRules({});setShowRuleModal(false);
+    setShieldedSquares({});setAiStunnedTurns(0);setActiveRules({});setShowRuleModal(false);
     setScore(0);setGameOver(false);setIsPlaying(true);
     setTurnTimeLeft(TURN_TIME);setTotalTimeLeft(TOTAL_TIME);
 
@@ -513,11 +513,12 @@ export default function KuantumSatranc({onGameComplete}){
     const sk=`${fr}-${fc}`,tk=`${tr}-${tc}`;
 
     // Target piece is protected by enemy shield!
-    if(shieldedSquares.has(tk) && tp && tp.startsWith(aiColor)){
+    const isProtected = Boolean(shieldedSquares[tk] > 0 || (shieldedSquares.has && shieldedSquares.has(tk)));
+    if(isProtected && tp && tp.startsWith(aiColor)){
       soundService.spellCast?.();
       addLog(`🛡️ Düşman Kalkanı darbeyi emdi ve kırıldı! ${PIECES[tp]} saldırıdan korundu!`);
-      let nextShields = new Set(shieldedSquares);
-      nextShields.delete(tk);
+      let nextShields = typeof shieldedSquares.has === 'function' ? new Set(shieldedSquares) : { ...shieldedSquares };
+      if(nextShields.delete) nextShields.delete(tk); else delete nextShields[tk];
       setShieldedSquares(nextShields);
       setPlayerTurn(aiColor);
       setTimeout(()=>triggerAiMove(curBoard,curCap,curOrbs,cRights,lMove,nextShields,frozenPieces,aiCaptureProgress,aiEnergyOrbs,aiColor,playerColor),600);
@@ -527,13 +528,33 @@ export default function KuantumSatranc({onGameComplete}){
     const newBoard=applyMove(fr,fc,tr,tc,curBoard);
     updateRights(fr,fc,tr,tc,mp,tp);
 
-    let nextShields = new Set(shieldedSquares);
-    if(nextShields.has(sk)){
+    let nextShields = typeof shieldedSquares.has === 'function' ? new Set(shieldedSquares) : { ...shieldedSquares };
+    if(nextShields[sk]){
+      nextShields[tk] = nextShields[sk];
+      delete nextShields[sk];
+    } else if(nextShields.has && nextShields.has(sk)){
       nextShields.delete(sk);
       nextShields.add(tk);
     }
-    if(tp && nextShields.has(tk)){
-      nextShields.delete(tk);
+    if(tp){
+      if(nextShields[tk]) delete nextShields[tk];
+      else if(nextShields.delete) nextShields.delete(tk);
+    }
+
+    // AI shield expiration: AI's shields expire after player completes their turn
+    if(typeof nextShields.has !== 'function'){
+      for(const [k, turns] of Object.entries(nextShields)){
+        const [pr, pc] = k.split('-').map(Number);
+        const p = newBoard[pr]?.[pc];
+        if(p && p[0] === aiColor){
+          if(turns - 1 <= 0){
+            delete nextShields[k];
+            addLog(`🛡️ AI ${PIECES[p]} üzerindeki kalkanın süresi doldu.`);
+          } else {
+            nextShields[k] = turns - 1;
+          }
+        }
+      }
     }
     setShieldedSquares(nextShields);
     const newMR={fr,fc,tr,tc};setLastMove(newMR);
@@ -611,7 +632,7 @@ export default function KuantumSatranc({onGameComplete}){
     if(aiStunnedTurns>0){setAiStunnedTurns(t=>t-1);addLog('❄️ AI dondurulmuş, tur atladı!');setPlayerTurn(curPlayerColor);return;}
 
     let activeBoard = curBoard.map(row => [...row]);
-    let activeShields = new Set(curShields);
+    let activeShields = typeof curShields.has === 'function' ? Object.fromEntries(Array.from(curShields).map(k=>[k,1])) : { ...curShields };
     let activeFrozen = { ...curFrozen };
     let aiOrbs = curAiOrbs;
     let aiCapt = curAiCapt;
@@ -626,7 +647,7 @@ export default function KuantumSatranc({onGameComplete}){
           for (let c = 0; c < 8; c++) {
             const p = activeBoard[r][c];
             const sk = `${r}-${c}`;
-            if (p === pType && !activeShields.has(sk)) {
+            if (p === pType && (!activeShields[sk] || activeShields[sk] <= 0)) {
               let isAttacked = false;
               for (let wr = 0; wr < 8; wr++) {
                 for (let wc = 0; wc < 8; wc++) {
@@ -650,12 +671,12 @@ export default function KuantumSatranc({onGameComplete}){
         if (targetToShield) break;
       }
       if (targetToShield) {
-        activeShields.add(targetToShield.sk);
+        activeShields[targetToShield.sk] = 1;
         aiOrbs -= 1;
-        setShieldedSquares(new Set(activeShields));
+        setShieldedSquares({ ...activeShields });
         setAiEnergyOrbs(aiOrbs);
         soundService.spellCast?.();
-        addLog(`🛡️ AI Kalkan Büyüsü Kullandı! ${PIECES[targetToShield.p]} korundu!`);
+        addLog(`🛡️ AI Kalkan Büyüsü Kullandı! ${PIECES[targetToShield.p]} 1 tur korundu!`);
       }
     }
 
@@ -728,17 +749,38 @@ export default function KuantumSatranc({onGameComplete}){
     const{fromR,fromC,toR,toC}=move,tp=activeBoard[toR][toC];
     const tk=`${toR}-${toC}`,moverPiece=activeBoard[fromR][fromC];
     const isEP=moverPiece===curAiColor+'P'&&Math.abs(fromC-toC)===1&&!tp,epk=`${fromR}-${toC}`;
-    if(activeShields.has(tk)&&tp?.startsWith(curPlayerColor)){
-      soundService.spellCast?.();addLog(`🛡️ AI saldırdı ama Kalkan ${PIECES[tp]} taşını korudu!`);
-      activeShields.delete(tk);
-      setShieldedSquares(new Set(activeShields));
+    const isTkShielded = Boolean(activeShields[tk] > 0 || (activeShields.has && activeShields.has(tk)));
+    const isEpShielded = Boolean(activeShields[epk] > 0 || (activeShields.has && activeShields.has(epk)));
+
+    if(isTkShielded && tp?.startsWith(curPlayerColor)){
+      soundService.spellCast?.();
+      addLog(`🛡️ AI saldırdı ama Kalkan ${PIECES[tp]} taşını korudu ve kırıldı!`);
+      if(activeShields.delete) activeShields.delete(tk); else delete activeShields[tk];
+
+      // Player shields expire after AI turn:
+      if(typeof activeShields.has !== 'function'){
+        for(const [k, turns] of Object.entries(activeShields)){
+          const [pr, pc] = k.split('-').map(Number);
+          const p = activeBoard[pr]?.[pc];
+          if(p && p[0] === curPlayerColor){
+            if(turns - 1 <= 0){
+              delete activeShields[k];
+              addLog(`🛡️ ${PIECES[p]} üzerindeki kalkanın süresi doldu (1 tur tamamlandı).`);
+            } else {
+              activeShields[k] = turns - 1;
+            }
+          }
+        }
+      }
+      setShieldedSquares(activeShields);
       setPlayerTurn(curPlayerColor);
       return;
     }
-    if(isEP&&activeShields.has(epk)){
-      soundService.spellCast?.();addLog('🛡️ AI Geçerken Alma denedi ama Kalkan piyonu korudu!');
-      activeShields.delete(epk);
-      setShieldedSquares(new Set(activeShields));
+    if(isEP && isEpShielded){
+      soundService.spellCast?.();
+      addLog('🛡️ AI Geçerken Alma denedi ama Kalkan piyonu korudu ve kırıldı!');
+      if(activeShields.delete) activeShields.delete(epk); else delete activeShields[epk];
+      setShieldedSquares(activeShields);
       setPlayerTurn(curPlayerColor);
       return;
     }
@@ -746,14 +788,34 @@ export default function KuantumSatranc({onGameComplete}){
     updateRights(fromR,fromC,toR,toC,activeBoard[fromR][fromC],tp);setLastMove(newMR);
 
     const sk=`${fromR}-${fromC}`;
-    if(activeShields.has(sk)){
+    if(activeShields[sk]){
+      activeShields[tk] = activeShields[sk];
+      delete activeShields[sk];
+    } else if(activeShields.has && activeShields.has(sk)){
       activeShields.delete(sk);
       activeShields.add(tk);
     }
-    if(tp && activeShields.has(tk) && !activeShields.has(sk)){
-      activeShields.delete(tk);
+    if(tp){
+      if(activeShields[tk]) delete activeShields[tk];
+      else if(activeShields.delete) activeShields.delete(tk);
     }
-    setShieldedSquares(new Set(activeShields));
+
+    // Player shields expire after AI finishes its turn without attacking them!
+    if(typeof activeShields.has !== 'function'){
+      for(const [k, turns] of Object.entries(activeShields)){
+        const [pr, pc] = k.split('-').map(Number);
+        const p = newBoard[pr]?.[pc];
+        if(p && p[0] === curPlayerColor){
+          if(turns - 1 <= 0){
+            delete activeShields[k];
+            addLog(`🛡️ ${PIECES[p]} üzerindeki kalkanın süresi doldu (1 tur tamamlandı).`);
+          } else {
+            activeShields[k] = turns - 1;
+          }
+        }
+      }
+    }
+    setShieldedSquares(activeShields);
     
     // AI Pawn auto-queen promotion upon reaching opposite end rank
     if(moverPiece==='bP'&&toR===7){newBoard[toR][toC]='bQ';addLog('♛ AI Piyonu Vezire terfi etti!');}
@@ -918,7 +980,14 @@ export default function KuantumSatranc({onGameComplete}){
       // Valid teleport!
       const sk=`${sr}-${sc}`,tk=`${r}-${c}`;
       const nb=testBoard;
-      if(shieldedSquares.has(sk)){
+      if(shieldedSquares[sk]){
+        setShieldedSquares(prev=>{
+          const n = { ...prev };
+          n[tk] = n[sk];
+          delete n[sk];
+          return n;
+        });
+      } else if(shieldedSquares.has && shieldedSquares.has(sk)){
         setShieldedSquares(prev=>{const n=new Set(prev);n.delete(sk);n.add(tk);return n;});
       }
       updateRights(sr,sc,r,c,p,null);
@@ -957,14 +1026,15 @@ export default function KuantumSatranc({onGameComplete}){
         addLog('⚠️ Şaha kalkan takılamaz! Şah her zaman açıkta olmalıdır.');
         return;
       }
-      if(shieldedSquares.has(key)){
+      const isAlreadyShielded = Boolean(shieldedSquares[key] > 0 || (shieldedSquares.has && shieldedSquares.has(key)));
+      if(isAlreadyShielded){
         soundService.error?.();
         addLog('⚠️ Bu taşta zaten aktif kalkan var!');
         return;
       }
-      setShieldedSquares(prev=>new Set(prev).add(key));
+      setShieldedSquares(prev=>({ ...prev, [key]: 1 }));
       soundService.spellCast?.();
-      addLog(`🛡️ Kalkan ${PIECES[piece]} taşına uygulandı!`);
+      addLog(`🛡️ Kalkan ${PIECES[piece]} taşına uygulandı! (1 tur boyunca ilk saldırıyı savuşturur)`);
       consumeOrb(1);
       setTurnTimeLeft(TURN_TIME);
       return;
@@ -1323,7 +1393,7 @@ export default function KuantumSatranc({onGameComplete}){
                 const isSel=selectedPos?.[0]===r&&selectedPos?.[1]===c;
                 const isTarget=validMoves.some(([vr,vc])=>vr===r&&vc===c);
                 const isTeleportDest=activeSpell==='TELEPORT'&&validTeleportSquares.some(([vr,vc])=>vr===r&&vc===c);
-                const isShielded=Boolean(cell && shieldedSquares.has(ck));
+                const isShielded=Boolean(cell && (shieldedSquares[ck]>0 || (shieldedSquares.has && shieldedSquares.has(ck))));
                 const isKingChk=ck===playerKingKey&&isPlayerInCheck;
                 const isFrozen=Boolean(cell && frozenPieces[ck]&&frozenPieces[ck]>0);
                 const isLast=lastMove&&((lastMove.fr===r&&lastMove.fc===c)||(lastMove.tr===r&&lastMove.tc===c));
@@ -1397,7 +1467,7 @@ export default function KuantumSatranc({onGameComplete}){
                     }}>
                       {cell&&PIECES[cell]}
                     </span>
-                    {isShielded&&<div style={{position:'absolute',top:'1px',right:'2px',fontSize:'0.65rem',zIndex:3,filter:'drop-shadow(0 0 2px #ea580c)'}} title="Kalkan Koruma">🛡️</div>}
+                    {isShielded&&<div style={{position:'absolute',top:'1px',right:'2px',fontSize:'0.65rem',zIndex:3,filter:'drop-shadow(0 0 2px #ea580c)'}} title="Kalkan Koruma (1 Tur)">🛡️</div>}
                     {isFrozen&&<div style={{position:'absolute',top:'1px',left:'2px',fontSize:'0.65rem',zIndex:3,filter:'drop-shadow(0 0 2px #94a3b8)'}} title="Donduruldu">❄️</div>}
                   </div>
                 );
