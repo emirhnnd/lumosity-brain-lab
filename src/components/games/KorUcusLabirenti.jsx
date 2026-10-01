@@ -257,27 +257,38 @@ export default function KorUcusLabirenti({ onGameComplete }) {
 
             // Visibility in Blindfold mode
             let showContent = !isBlind || phase === 'hit' || phase === 'level_clear';
-            let bg = 'rgba(255, 255, 255, 0.03)';
+            let bg = 'rgba(255, 255, 255, 0.03)'; // Default uniform background
             let content = null;
 
             if (isPlayer) {
               bg = 'linear-gradient(135deg, #00f2fe, #0072ff)';
               content = '🚀';
-            } else if (isGoal) {
-              bg = showContent ? 'rgba(245, 158, 11, 0.25)' : 'rgba(245, 158, 11, 0.08)';
-              content = '🏁';
-            } else if (isWall) {
-              bg = showContent ? 'rgba(255, 255, 255, 0.2)' : 'transparent';
-              content = showContent ? '🧱' : null;
-            } else if (isHazard) {
-              bg = showContent ? 'rgba(239, 68, 68, 0.25)' : 'transparent';
-              content = showContent ? '💀' : null;
-            } else if (isCoin) {
-              bg = showContent ? 'rgba(251, 191, 36, 0.2)' : 'transparent';
-              content = showContent ? '🪙' : null;
-            } else if (isBlind && isInTrail) {
-              bg = 'rgba(0, 242, 254, 0.12)';
-              content = '•';
+            } else if (!showContent) {
+              // BLIND MODE: Hide everything uniformly except player, trail, and a faint goal
+              if (isGoal) {
+                bg = 'rgba(245, 158, 11, 0.08)'; // Goal remains faintly visible
+              } else if (isInTrail) {
+                bg = 'rgba(0, 242, 254, 0.12)';
+                content = '•';
+              } else {
+                // Critical Fix: Walls, hazards, coins, and empty spaces MUST all have the exact same background so you can't cheat!
+                bg = 'rgba(255, 255, 255, 0.03)';
+              }
+            } else {
+              // VISIBLE MODE
+              if (isGoal) {
+                bg = 'rgba(245, 158, 11, 0.25)';
+                content = '🏁';
+              } else if (isWall) {
+                bg = 'rgba(255, 255, 255, 0.2)';
+                content = '🧱';
+              } else if (isHazard) {
+                bg = 'rgba(239, 68, 68, 0.25)';
+                content = '💀';
+              } else if (isCoin) {
+                bg = 'rgba(251, 191, 36, 0.2)';
+                content = '🪙';
+              }
             }
 
             return (
