@@ -356,16 +356,16 @@ const RULE_OPTIONS=[
   {id:'REVERSE_PAWN',emoji:'⬇️',name:'Geri Piyon',desc:'Piyonların geri de gidebilir (3 tur)',turns:3},
   {id:'ROOK_JUMP',emoji:'🦘',name:'Kale Atlama',desc:'Kaleler at gibi atlayabilir (3 tur)',turns:3},
   {id:'DOUBLE_MOVE',emoji:'⚡',name:'Çift Hamle',desc:'Bu tur 2 hamle hakkın (1 tur)',turns:1},
-  {id:'QUEEN_BAN',emoji:'🚫',name:'Vezir Yasağı',desc:'AI veziri 3 tur hareket edemez',turns:3},
-  {id:'CHAOS_AI',emoji:'🎲',name:'Kaos Modu',desc:'AI 3 tur rastgele hamle yapar',turns:3},
+  {id:'QUEEN_BAN',emoji:'🚫',name:'Vezir Yasağı',desc:'AI veziri 2 tur hareket edemez',turns:2},
+  {id:'CHAOS_AI',emoji:'🎲',name:'Kaos Modu',desc:'AI 2 tur rastgele hamle yapar',turns:2},
 ];
 
 const SPELLS=[
   {id:'ADD_TIME',label:'⏱️ +10sn',cost:1,color:'#10b981'},
   {id:'SHIELD',label:'🛡️ Kalkan (1T)',cost:1,color:'#f97316'},
-  {id:'FREEZE',label:'❄️ Dondur',cost:1,color:'#64748b'},
+  {id:'FREEZE',label:'❄️ Dondur (2T)',cost:2,color:'#64748b'},
   {id:'TELEPORT',label:'🌀 Işınla',cost:2,color:'#a855f7'},
-  {id:'ASCEND',label:"♕ Vezir'e",cost:2,color:'#fbbf24'},
+  {id:'ASCEND',label:"♕ Vezir'e",cost:3,color:'#fbbf24'},
   {id:'RULE_CHANGE',label:'🔀 Kural',cost:2,color:'#e11d48'},
   {id:'KING_ASCEND',label:'👑 2. Kral',cost:3,color:'#dc2626'},
   {id:'MIND_CONTROL',label:'🧠 Hipnoz',cost:3,color:'#c026d3'},
@@ -707,8 +707,8 @@ export default function KuantumSatranc({onGameComplete}){
       }
     }
 
-    // 2. AI Freeze (Cost: 1 Orb) - Target player's active threat (not King)
-    if (aiOrbs >= 1) {
+    // 2. AI Freeze (Cost: 2 Orbs) - Target player's active threat (not King)
+    if (aiOrbs >= 2) {
       const threats = [curPlayerColor+'Q', curPlayerColor+'R', curPlayerColor+'B', curPlayerColor+'N'];
       let targetToFreeze = null;
       for (const pType of threats) {
@@ -730,7 +730,7 @@ export default function KuantumSatranc({onGameComplete}){
       }
       if (targetToFreeze) {
         activeFrozen[targetToFreeze.fk] = 2;
-        aiOrbs -= 1;
+        aiOrbs -= 2;
         setFrozenPieces({ ...activeFrozen });
         setAiEnergyOrbs(aiOrbs);
         soundService.spellCast?.();
@@ -738,11 +738,11 @@ export default function KuantumSatranc({onGameComplete}){
       }
     }
 
-    // 3. AI Ascend (Cost: 2 Orbs)
-    if (aiOrbs >= 2) {
+    // 3. AI Ascend (Cost: 3 Orbs) - only for advanced pawns (last 2 rows before promo)
+    if (aiOrbs >= 3) {
       let pawnToAscend = null;
       if (curAiColor === 'b') {
-        for (let r = 6; r >= 4; r--) {
+        for (let r = 6; r >= 6; r--) { // only row 6 (one step from promo rank 7)
           for (let c = 0; c < 8; c++) {
             if (activeBoard[r][c] === 'bP') {
               pawnToAscend = { r, c };
@@ -752,7 +752,7 @@ export default function KuantumSatranc({onGameComplete}){
           if (pawnToAscend) break;
         }
       } else {
-        for (let r = 1; r <= 3; r++) {
+        for (let r = 1; r <= 1; r++) { // only row 1 (one step from promo rank 0)
           for (let c = 0; c < 8; c++) {
             if (activeBoard[r][c] === 'wP') {
               pawnToAscend = { r, c };
@@ -764,7 +764,7 @@ export default function KuantumSatranc({onGameComplete}){
       }
       if (pawnToAscend) {
         activeBoard[pawnToAscend.r][pawnToAscend.c] = curAiColor + 'Q';
-        aiOrbs -= 2;
+        aiOrbs -= 3;
         setAiEnergyOrbs(aiOrbs);
         soundService.levelUp?.();
         addLog(`♕ AI Piyon Terfisi Büyüsü! AI piyonu Vezir'e dönüştü!`);
@@ -1091,7 +1091,7 @@ export default function KuantumSatranc({onGameComplete}){
       setFrozenPieces(prev=>({...prev,[key]:2}));
       soundService.spellCast?.();
       addLog(`❄️ ${PIECES[piece]} 2 tur donduruldu!`);
-      consumeOrb(1);
+      consumeOrb(2);
       setTurnTimeLeft(TURN_TIME);
       return;
     }
@@ -1113,6 +1113,12 @@ export default function KuantumSatranc({onGameComplete}){
         addLog(`⚠️ Yalnızca piyonlar vezire terfi edebilir (${PIECES[piece]} terfi edemez).`);
         return;
       }
+      // Hipnozlu piyon ASCEND ile Vezir yapılamaz (MC+ASCEND combo engeli)
+      if(mindControlledSquares[key]){
+        soundService.error?.();
+        addLog('⚠️ Hipnozlu piyon Vezire terfi edemez! (Kale olarak ilerleyebilir)');
+        return;
+      }
       const nb=board.map(row=>[...row]);
       nb[r][c]=playerColor+'Q';
       if(isInCheck(playerColor,nb)){
@@ -1123,12 +1129,12 @@ export default function KuantumSatranc({onGameComplete}){
       setBoard(nb);
       soundService.levelUp?.();
       addLog(`♕ Piyon başarıyla Vezir'e (${PIECES[playerColor+'Q']}) terfi etti!`);
-      consumeOrb(2);
+      consumeOrb(3);
       setTurnTimeLeft(TURN_TIME);
       const okA=afterMoveChecks(nb,playerColor,lastMove,castlingRights);
       if(!okA) return;
       setPlayerTurn(aiColor);
-      setTimeout(()=>triggerAiMove(nb,captureProgress,energyOrbs-2,castlingRights,lastMove,shieldedSquares,frozenPieces,aiCaptureProgress,aiEnergyOrbs,aiColor,playerColor),600);
+      setTimeout(()=>triggerAiMove(nb,captureProgress,energyOrbs-3,castlingRights,lastMove,shieldedSquares,frozenPieces,aiCaptureProgress,aiEnergyOrbs,aiColor,playerColor),600);
       return;
     }
 
