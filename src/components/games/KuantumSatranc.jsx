@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Zap, Award, Play, Crown, AlertTriangle, Clock, Bot } from 'lucide-react';
 import { soundService } from '../../services/soundService';
 
@@ -73,18 +73,40 @@ function getPseudoMoves(r,c,pBoard,lastMove=null,activeRules={},playerColor='w')
   return moves;
 }
 
+function findAllKings(color,pBoard){
+  const kings=[];
+  for(let r=0;r<8;r++) for(let c=0;c<8;c++) if(pBoard[r][c]===color+'K') kings.push([r,c]);
+  return kings;
+}
+
 function findKing(color,pBoard){
-  for(let r=0;r<8;r++) for(let c=0;c<8;c++) if(pBoard[r][c]===color+'K') return[r,c];
-  return null;
+  const kings=findAllKings(color,pBoard);
+  if(kings.length===0) return null;
+  const enemy=color==='w'?'b':'w';
+  for(const[kr,kc] of kings){
+    for(let r=0;r<8;r++) for(let c=0;c<8;c++)
+      if(pBoard[r][c]&&pBoard[r][c][0]===enemy)
+        if(getPseudoMoves(r,c,pBoard,null).some(([tr,tc])=>tr===kr&&tc===kc)) return[kr,kc];
+  }
+  return kings[0];
 }
 
 function isInCheck(color,pBoard){
-  const kPos=findKing(color,pBoard); if(!kPos) return false;
-  const[kr,kc]=kPos,enemy=color==='w'?'b':'w';
-  for(let r=0;r<8;r++) for(let c=0;c<8;c++)
-    if(pBoard[r][c]&&pBoard[r][c][0]===enemy)
-      if(getPseudoMoves(r,c,pBoard,null).some(([tr,tc])=>tr===kr&&tc===kc)) return true;
-  return false;
+  const kings=findAllKings(color,pBoard); if(kings.length===0) return false;
+  const enemy=color==='w'?'b':'w';
+  if(kings.length===1){
+    const[kr,kc]=kings[0];
+    for(let r=0;r<8;r++) for(let c=0;c<8;c++)
+      if(pBoard[r][c]&&pBoard[r][c][0]===enemy)
+        if(getPseudoMoves(r,c,pBoard,null).some(([tr,tc])=>tr===kr&&tc===kc)) return true;
+    return false;
+  }
+  return kings.every(([kr,kc])=>{
+    for(let r=0;r<8;r++) for(let c=0;c<8;c++)
+      if(pBoard[r][c]&&pBoard[r][c][0]===enemy)
+        if(getPseudoMoves(r,c,pBoard,null).some(([tr,tc])=>tr===kr&&tc===kc)) return true;
+    return false;
+  });
 }
 
 function applyMove(fr,fc,tr,tc,pBoard){
@@ -103,11 +125,13 @@ function getLegalMoves(r,c,pBoard,lastMove,cr,frozenPieces={},activeRules={},pla
   const piece=pBoard[r][c]; if(!piece) return [];
   const color=piece[0];
   const moves=getPseudoMoves(r,c,pBoard,lastMove,activeRules,playerColor).filter(([tr,tc])=>!isInCheck(color,applyMove(r,c,tr,tc,pBoard)));
-  if(piece[1]==='K'&&!isInCheck(color,pBoard)){
+  if(piece[1]==='K'){
     const row=color==='w'?7:0;
-    const[rk,rq]=color==='w'?[cr.wK,cr.wQ]:[cr.bK,cr.bQ];
-    if(rk&&!pBoard[row][5]&&!pBoard[row][6]&&!isInCheck(color,applyMove(row,4,row,5,pBoard))&&!isInCheck(color,applyMove(row,4,row,6,pBoard))) moves.push([row,6]);
-    if(rq&&!pBoard[row][1]&&!pBoard[row][2]&&!pBoard[row][3]&&!isInCheck(color,applyMove(row,4,row,3,pBoard))&&!isInCheck(color,applyMove(row,4,row,2,pBoard))) moves.push([row,2]);
+    if(r===row&&c===4&&!isInCheck(color,pBoard)){
+      const[rk,rq]=color==='w'?[cr.wK,cr.wQ]:[cr.bK,cr.bQ];
+      if(rk&&!pBoard[row][5]&&!pBoard[row][6]&&!isInCheck(color,applyMove(row,4,row,5,pBoard))&&!isInCheck(color,applyMove(row,4,row,6,pBoard))) moves.push([row,6]);
+      if(rq&&!pBoard[row][1]&&!pBoard[row][2]&&!pBoard[row][3]&&!isInCheck(color,applyMove(row,4,row,3,pBoard))&&!isInCheck(color,applyMove(row,4,row,2,pBoard))) moves.push([row,2]);
+    }
   }
   return moves;
 }
@@ -337,14 +361,14 @@ const RULE_OPTIONS=[
 ];
 
 const SPELLS=[
-  {id:'ADD_TIME',label:'⏱️ +10sn',cost:1,color:'#22d3ee'},
-  {id:'SHIELD',label:'🛡️ Kalkan',cost:1,color:'#10b981'},
-  {id:'FREEZE',label:'❄️ Dondur',cost:1,color:'#818cf8'},
-  {id:'TELEPORT',label:'🌀 Işınla',cost:2,color:'#38bdf8'},
+  {id:'ADD_TIME',label:'⏱️ +10sn',cost:1,color:'#10b981'},
+  {id:'SHIELD',label:'🛡️ Kalkan',cost:1,color:'#f97316'},
+  {id:'FREEZE',label:'❄️ Dondur',cost:1,color:'#64748b'},
+  {id:'TELEPORT',label:'🌀 Işınla',cost:2,color:'#a855f7'},
   {id:'ASCEND',label:"♕ Vezir'e",cost:2,color:'#fbbf24'},
-  {id:'RULE_CHANGE',label:'🔀 Kural',cost:2,color:'#f97316'},
-  {id:'KING_ASCEND',label:'👑 2. Kral',cost:3,color:'#ef4444'},
-  {id:'MIND_CONTROL',label:'🧠 Hipnoz',cost:3,color:'#d946ef'},
+  {id:'RULE_CHANGE',label:'🔀 Kural',cost:2,color:'#e11d48'},
+  {id:'KING_ASCEND',label:'👑 2. Kral',cost:3,color:'#dc2626'},
+  {id:'MIND_CONTROL',label:'🧠 Hipnoz',cost:3,color:'#c026d3'},
 ];
 
 function fmt(s){const m=Math.floor(s/60);return `${m}:${String(s%60).padStart(2,'0')}`;}
@@ -520,7 +544,11 @@ export default function KuantumSatranc({onGameComplete}){
       setScore(s=>s+(val*100));np=curCap+1;
       if(np>=3){np=0;no=Math.min(9,curOrbs+1);soundService.levelUp?.();addLog(`⚡ ENERJİ DOLDU! +1 Orb → Toplam: ${no}`);}
       else addLog(`💥 Taş Yendi${isEP?' (Geçerken Alma)':''}! Enerji: [${np}/3]`);
-      if(tp===aiColor+'K'){endGame(true,'👑 Düşman Kralı Devrildi! Zafer!');return;}
+      if(tp&&tp[1]==='K'){
+        const remKings=findAllKings(aiColor,newBoard);
+        if(remKings.length===0){endGame(true,'👑 Düşman Kralı Devrildi! Zafer!');return;}
+        else addLog('💥 Rakibin bir Kralı devrildi! Ancak tahtta başka bir Kralı daha var!');
+      }
     } else {soundService.click?.();if(isCastle) addLog('🏰 Rok Yapıldı!');}
     setCaptureProgress(np);setEnergyOrbs(no);setBoard(newBoard);
 
@@ -734,7 +762,11 @@ export default function KuantumSatranc({onGameComplete}){
     if(tp||isEP){
       soundService.error?.();
       addLog(`💀 AI ${PIECES[moverPiece]} → Sizin Taşınızı Yedi!`);
-      if(tp===curPlayerColor+'K'){endGame(false,'💀 Kralınız Devrildi! AI Kazandı!');return;}
+      if(tp&&tp[1]==='K'){
+        const remPlayerKings=findAllKings(curPlayerColor,newBoard);
+        if(remPlayerKings.length===0){endGame(false,'💀 Kralınız Devrildi! AI Kazandı!');return;}
+        else addLog('⚠️ Bir Kralınız devrildi! Ancak tahtta 2. Kralınız hayatta!');
+      }
       
       aiCapt += 1;
       if (aiCapt >= 3) {
@@ -782,72 +814,283 @@ export default function KuantumSatranc({onGameComplete}){
         setTurnTimeLeft(p=>{if(p<=1){clearTimer();return 0;}return p-1;});
         setTotalTimeLeft(p=>{if(p<=1){clearTimer();return 0;}return p-1;});
       },1000);
-      soundService.spellCast?.();addLog(`⏱️ +10sn eklendi!`);setEnergyOrbs(o=>Math.max(0,o-1));return;
+      soundService.spellCast?.();addLog(`⏱️ +10sn eklendi! (Kalan: ${nt}sn)`);setEnergyOrbs(o=>Math.max(0,o-1));return;
     }
     if(spellId==='RULE_CHANGE'){setShowRuleModal(true);return;}
-    setActiveSpell(activeSpell===spellId?null:spellId);
+    if(activeSpell===spellId){
+      setActiveSpell(null);
+      setSelectedPos(null);
+      addLog('🪄 Büyü kullanımı iptal edildi.');
+      return;
+    }
+    setActiveSpell(spellId);
+    if(spellId==='TELEPORT'){
+      if(selectedPos){
+        const[sr,sc]=selectedPos,p=board[sr]?.[sc];
+        if(p&&p.startsWith(playerColor)&&p[1]!=='K'){
+          addLog(`🌀 Işınlanma: ${PIECES[p]} seçili! Şimdi tahtada BOŞ bir hedef kareye tıklayın.`);
+        } else {
+          setSelectedPos(null);
+          addLog('🌀 Işınlanma: Önce ışınlamak istediğiniz kendi taşınıza tıklayın.');
+        }
+      } else {
+        addLog('🌀 Işınlanma: Önce ışınlamak istediğiniz kendi taşınıza tıklayın.');
+      }
+    } else if(spellId==='SHIELD'){
+      addLog('🛡️ Kalkan: Korumak istediğiniz bir taşınıza tıklayın (Şah hariç).');
+    } else if(spellId==='FREEZE'){
+      addLog('❄️ Dondur: 2 tur dondurmak istediğiniz bir rakip taşa tıklayın (Şah hariç).');
+    } else if(spellId==='ASCEND'){
+      addLog("♕ Vezir'e Terfi: Vezir yapmak istediğiniz bir piyonunuza tıklayın.");
+    } else if(spellId==='KING_ASCEND'){
+      addLog('👑 2. Kral: İkinci bir Krala dönüştürmek istediğiniz bir piyonunuza tıklayın.');
+    } else if(spellId==='MIND_CONTROL'){
+      addLog('🧠 Hipnoz: Saf değiştirtmek istediğiniz bir rakip piyona tıklayın.');
+    }
   };
 
   const handleApplySpell=(r,c,key)=>{
     const piece=board[r][c];
+
+    // 1. TELEPORT SPELL
     if(activeSpell==='TELEPORT'){
-      if(!piece&&selectedPos){
-        const[sr,sc]=selectedPos,p=board[sr][sc];
-        if(!p?.startsWith(playerColor)){setActiveSpell(null);return;}
-        if(p[1]==='K'){
+      if(!selectedPos){
+        if(!piece){
           soundService.error?.();
-          addLog('⚠️ Şah ışınlanamaz! Yalnızca diğer taşlar ışınlanabilir.');
-          setActiveSpell(null);
+          addLog('⚠️ Önce ışınlamak istediğiniz kendi taşınıza tıklayın.');
           return;
         }
-        const sk=`${sr}-${sc}`,tk=`${r}-${c}`;
-        const nb=board.map(row=>[...row]);nb[r][c]=p;nb[sr][sc]=null;
-        setBoard(nb);soundService.spellCast?.();addLog(`🌀 IŞINLANMA! ${PIECES[p]} → [${r},${c}]`);
-        updateRights(sr,sc,r,c,p,null);
-        if(shieldedSquares.has(sk)){setShieldedSquares(prev=>{const n=new Set(prev);n.delete(sk);n.add(tk);return n;});}
-        consumeOrb(2);afterMoveChecks(nb,playerColor,lastMove,castlingRights);
-      }
-    } else if(activeSpell==='SHIELD'){
-      if(!piece){setActiveSpell(null);return;}
-      if(piece[1]==='K'){
-        soundService.error?.();
-        addLog('⚠️ Şaha kalkan takılamaz! Şah her zaman açıkta olmalıdır.');
-        setActiveSpell(null);
+        if(piece.startsWith(aiColor)){
+          soundService.error?.();
+          addLog('⚠️ Rakip taşı ışınlayamazsınız! Kendi taşınızı seçin.');
+          return;
+        }
+        if(piece[1]==='K'){
+          soundService.error?.();
+          addLog('⚠️ Şah ışınlanamaz! Yalnızca diğer taşlarınızı ışınlayabilirsiniz.');
+          return;
+        }
+        if(frozenPieces[key]>0){
+          soundService.error?.();
+          addLog(`❄️ Dondurulmuş taş (${PIECES[piece]}) ışınlanamaz! Başka bir taş seçin.`);
+          return;
+        }
+        setSelectedPos([r,c]);
+        soundService.click?.();
+        addLog(`🌀 Işınlanacak taş seçildi: ${PIECES[piece]}. Şimdi BOŞ bir hedef kareye tıklayın!`);
         return;
       }
-      if(piece.startsWith(playerColor)){
-        setShieldedSquares(prev=>new Set(prev).add(key));
-        soundService.spellCast?.();
-        addLog(`🛡️ Kalkan ${PIECES[piece]} taşına uygulandı!`);
-        consumeOrb(1);
-        setTurnTimeLeft(TURN_TIME); // Tam düşünme süresi ver
-      } else {
-        addLog('⚠️ Yalnızca kendi taşlarınıza kalkan takabilirsiniz.');
+
+      // Piece was already selected
+      const[sr,sc]=selectedPos,p=board[sr]?.[sc];
+      if(sr===r&&sc===c){
+        setSelectedPos(null);
+        addLog('🌀 Işınlanacak taş seçimi iptal edildi. Başka bir taş seçebilirsiniz.');
+        return;
       }
-    } else if(activeSpell==='ASCEND'){
-      if(piece===playerColor+'P'){const nb=board.map(row=>[...row]);nb[r][c]=playerColor+'Q';setBoard(nb);soundService.levelUp?.();addLog(`♕ Piyon → Vezir (${PIECES[playerColor+'Q']})!`);consumeOrb(2);setTurnTimeLeft(TURN_TIME);}
-    } else if(activeSpell==='KING_ASCEND'){
-      if(piece===playerColor+'P'&&energyOrbs>=3){const nb=board.map(row=>[...row]);nb[r][c]=playerColor+'K';setBoard(nb);soundService.levelUp?.();addLog(`👑 Piyon → İkinci Kral (${PIECES[playerColor+'K']})!`);consumeOrb(3);setTurnTimeLeft(TURN_TIME);}
-    } else if(activeSpell==='MIND_CONTROL'){
-      if(piece===aiColor+'P'&&energyOrbs>=3){const nb=board.map(row=>[...row]);nb[r][c]=playerColor+'P';setBoard(nb);soundService.spellCast?.();addLog('🧠 Hipnoz! Rakip piyon saf değiştirdi!');consumeOrb(3);afterMoveChecks(nb,playerColor,lastMove,castlingRights);setTurnTimeLeft(TURN_TIME);}
-    } else if(activeSpell==='FREEZE'){
-      if(!piece){setActiveSpell(null);return;}
-      if(piece[1]==='K'){
+      if(piece&&piece.startsWith(playerColor)){
+        if(piece[1]==='K'){
+          soundService.error?.();
+          addLog('⚠️ Şah ışınlanamaz! Lütfen boş bir hedef kare seçin.');
+          return;
+        }
+        setSelectedPos([r,c]);
+        soundService.click?.();
+        addLog(`🌀 Işınlanacak taş değiştirildi: ${PIECES[piece]}. Şimdi BOŞ bir hedef kareye tıklayın!`);
+        return;
+      }
+      if(piece){
         soundService.error?.();
-        addLog('⚠️ Şah dondurulamaz! Başka bir taşı hedefleyin.');
-        setActiveSpell(null);
+        addLog('⚠️ Dolu kareye ışınlanamazsınız! Yalnızca boş kareleri seçebilirsiniz.');
+        return;
+      }
+
+      // Empty square: test if it leaves king in check
+      const testBoard=board.map(row=>[...row]);
+      testBoard[r][c]=p;
+      testBoard[sr][sc]=null;
+      if(isInCheck(playerColor,testBoard)){
+        soundService.error?.();
+        addLog('⚠️ Bu ışınlanma Şahınızı açıkta bırakır veya Şah tehdidini çözmez!');
+        return;
+      }
+
+      // Valid teleport!
+      const sk=`${sr}-${sc}`,tk=`${r}-${c}`;
+      const nb=testBoard;
+      if(shieldedSquares.has(sk)){
+        setShieldedSquares(prev=>{const n=new Set(prev);n.delete(sk);n.add(tk);return n;});
+      }
+      updateRights(sr,sc,r,c,p,null);
+      soundService.spellCast?.();
+      addLog(`🌀 IŞINLANMA BAŞARILI! ${PIECES[p]} → ${'abcdefgh'[c]}${8-r} karesine sıçradı!`);
+      consumeOrb(2);
+      setTurnTimeLeft(TURN_TIME);
+
+      const isPromotion=(playerColor==='w'&&p==='wP'&&r===0)||(playerColor==='b'&&p==='bP'&&r===7);
+      if(isPromotion){
+        soundService.levelUp?.();
+        setPendingPromotion({r,c,boardSnap:nb,moveRec:{fr:sr,fc:sc,tr:r,tc:c}});
+        addLog('🌟 IŞINLANAN PİYON TERFİ ETTİ! Terfi etmek istediğiniz taşı seçin!');
+        setBoard(nb);
+        return;
+      }
+      setBoard(nb);
+      afterMoveChecks(nb,playerColor,{fr:sr,fc:sc,tr:r,tc:c},castlingRights);
+      return;
+    }
+
+    // 2. SHIELD SPELL
+    if(activeSpell==='SHIELD'){
+      if(!piece){
+        soundService.error?.();
+        addLog('⚠️ Kalkan takmak için bir taşınızı seçin (boş kare seçilemez).');
         return;
       }
       if(piece.startsWith(aiColor)){
-        setFrozenPieces(prev=>({...prev,[key]:2}));
-        soundService.spellCast?.();
-        addLog(`❄️ ${PIECES[piece]} 2 tur donduruldu!`);
-        consumeOrb(1);
-        setTurnTimeLeft(TURN_TIME);
-      } else {
-        addLog('⚠️ Yalnızca rakip taşları dondurabilirsiniz (Şah hariç).');
+        soundService.error?.();
+        addLog('⚠️ Yalnızca kendi taşlarınıza kalkan takabilirsiniz.');
+        return;
       }
+      if(piece[1]==='K'){
+        soundService.error?.();
+        addLog('⚠️ Şaha kalkan takılamaz! Şah her zaman açıkta olmalıdır.');
+        return;
+      }
+      if(shieldedSquares.has(key)){
+        soundService.error?.();
+        addLog('⚠️ Bu taşta zaten aktif kalkan var!');
+        return;
+      }
+      setShieldedSquares(prev=>new Set(prev).add(key));
+      soundService.spellCast?.();
+      addLog(`🛡️ Kalkan ${PIECES[piece]} taşına uygulandı!`);
+      consumeOrb(1);
+      setTurnTimeLeft(TURN_TIME);
+      return;
     }
+
+    // 3. FREEZE SPELL
+    if(activeSpell==='FREEZE'){
+      if(!piece){
+        soundService.error?.();
+        addLog('⚠️ Dondurmak için bir rakip taş seçin (boş kare seçilemez).');
+        return;
+      }
+      if(piece.startsWith(playerColor)){
+        soundService.error?.();
+        addLog('⚠️ Kendi taşınızı donduramazsınız! Rakip bir taş seçin.');
+        return;
+      }
+      if(piece[1]==='K'){
+        soundService.error?.();
+        addLog('⚠️ Şah dondurulamaz! Başka bir rakip taşı hedefleyin.');
+        return;
+      }
+      setFrozenPieces(prev=>({...prev,[key]:2}));
+      soundService.spellCast?.();
+      addLog(`❄️ ${PIECES[piece]} 2 tur donduruldu!`);
+      consumeOrb(1);
+      setTurnTimeLeft(TURN_TIME);
+      return;
+    }
+
+    // 4. ASCEND (Piyon -> Vezir)
+    if(activeSpell==='ASCEND'){
+      if(!piece){
+        soundService.error?.();
+        addLog('⚠️ Vezire dönüştürmek için bir piyonunuzu seçin.');
+        return;
+      }
+      if(piece.startsWith(aiColor)){
+        soundService.error?.();
+        addLog('⚠️ Rakip piyonu terfi ettiremezsiniz!');
+        return;
+      }
+      if(piece!==playerColor+'P'){
+        soundService.error?.();
+        addLog(`⚠️ Yalnızca piyonlar vezire terfi edebilir (${PIECES[piece]} terfi edemez).`);
+        return;
+      }
+      const nb=board.map(row=>[...row]);
+      nb[r][c]=playerColor+'Q';
+      setBoard(nb);
+      soundService.levelUp?.();
+      addLog(`♕ Piyon başarıyla Vezir'e (${PIECES[playerColor+'Q']}) terfi etti!`);
+      consumeOrb(2);
+      setTurnTimeLeft(TURN_TIME);
+      afterMoveChecks(nb,playerColor,lastMove,castlingRights);
+      return;
+    }
+
+    // 5. KING_ASCEND (Piyon -> 2. Kral)
+    if(activeSpell==='KING_ASCEND'){
+      if(!piece){
+        soundService.error?.();
+        addLog('⚠️ 2. Kral yapmak için bir piyonunuzu seçin.');
+        return;
+      }
+      if(piece.startsWith(aiColor)){
+        soundService.error?.();
+        addLog('⚠️ Rakip taşı Kral yapamazsınız!');
+        return;
+      }
+      if(piece!==playerColor+'P'){
+        soundService.error?.();
+        addLog(`⚠️ Yalnızca piyonlar 2. Krala dönüştürülebilir (${PIECES[piece]} dönüştürülemez).`);
+        return;
+      }
+      if(energyOrbs<3){
+        soundService.error?.();
+        addLog('⚠️ Yetersiz enerji! 2. Kral için 3 Orb gereklidir.');
+        setActiveSpell(null);
+        return;
+      }
+      const nb=board.map(row=>[...row]);
+      nb[r][c]=playerColor+'K';
+      setBoard(nb);
+      soundService.levelUp?.();
+      addLog(`👑 Piyonunuz İKİNCİ KRAL (${PIECES[playerColor+'K']}) oldu! Tahtta 2 Kralınız var!`);
+      consumeOrb(3);
+      setTurnTimeLeft(TURN_TIME);
+      afterMoveChecks(nb,playerColor,lastMove,castlingRights);
+      return;
+    }
+
+    // 6. MIND_CONTROL (Hipnoz)
+    if(activeSpell==='MIND_CONTROL'){
+      if(!piece){
+        soundService.error?.();
+        addLog('⚠️ Hipnoz etmek için bir rakip piyon seçin.');
+        return;
+      }
+      if(piece.startsWith(playerColor)){
+        soundService.error?.();
+        addLog('⚠️ Zaten kendi tarafınızda olan bir taşı hipnoz edemezsiniz!');
+        return;
+      }
+      if(piece!==aiColor+'P'){
+        soundService.error?.();
+        addLog('⚠️ Hipnoz büyüsü yalnızca rakip piyonlar üzerinde çalışır!');
+        return;
+      }
+      if(energyOrbs<3){
+        soundService.error?.();
+        addLog('⚠️ Yetersiz enerji! Hipnoz için 3 Orb gereklidir.');
+        setActiveSpell(null);
+        return;
+      }
+      const nb=board.map(row=>[...row]);
+      nb[r][c]=playerColor+'P';
+      setBoard(nb);
+      soundService.spellCast?.();
+      addLog('🧠 ZİHİN KONTROLÜ! Rakip piyon saf değiştirdi ve artık sizin ordunuzda!');
+      consumeOrb(3);
+      setTurnTimeLeft(TURN_TIME);
+      afterMoveChecks(nb,playerColor,lastMove,castlingRights);
+      return;
+    }
+
     setActiveSpell(null);
   };
 
@@ -885,6 +1128,27 @@ export default function KuantumSatranc({onGameComplete}){
   const isAiInCheck=isInCheck(aiColor,board);
   const playerKingPos=findKing(playerColor,board);
   const playerKingKey=playerKingPos?`${playerKingPos[0]}-${playerKingPos[1]}`:'';
+
+  const validTeleportSquares = useMemo(() => {
+    if (activeSpell !== 'TELEPORT' || !selectedPos) return [];
+    const [sr, sc] = selectedPos;
+    const p = board[sr]?.[sc];
+    if (!p || !p.startsWith(playerColor) || p[1] === 'K') return [];
+    const list = [];
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        if (!board[r][c]) {
+          const tb = board.map(row => [...row]);
+          tb[r][c] = p;
+          tb[sr][sc] = null;
+          if (!isInCheck(playerColor, tb)) {
+            list.push([r, c]);
+          }
+        }
+      }
+    }
+    return list;
+  }, [activeSpell, selectedPos, board, playerColor]);
 
   const turnPct=turnTimeLeft/TURN_TIME,totalPct=totalTimeLeft/TOTAL_TIME;
   const turnColor=turnPct>0.5?'#10b981':turnPct>0.25?'#f59e0b':'#ef4444';
@@ -996,6 +1260,48 @@ export default function KuantumSatranc({onGameComplete}){
               </span>
             </div>
 
+            {/* AKTİF BÜYÜ REHBER BANNERI */}
+            {activeSpell && (
+              <div style={{
+                display:'flex',
+                justifyContent:'space-between',
+                alignItems:'center',
+                padding:'0.45rem 0.85rem',
+                marginBottom:'0.5rem',
+                background:'rgba(168, 85, 247, 0.16)',
+                border:'1.5px solid #a855f7',
+                borderRadius:'var(--radius-md)',
+                color:'#f3e8ff',
+                fontSize:'0.82rem',
+                fontWeight:'700'
+              }}>
+                <span>
+                  🔮 Aktif Büyü: {SPELLS.find(s=>s.id===activeSpell)?.label}
+                  {activeSpell==='TELEPORT' && (selectedPos ? ' → Parlayan boş hedef kareye tıklayın!' : ' → Işınlanacak taşınızı seçin!')}
+                  {activeSpell==='SHIELD' && ' → Korumak istediğiniz taşınıza tıklayın!'}
+                  {activeSpell==='FREEZE' && ' → Dondurmak istediğiniz rakip taşa tıklayın!'}
+                  {activeSpell==='ASCEND' && ' → Vezire terfi edecek piyonunuzu seçin!'}
+                  {activeSpell==='KING_ASCEND' && ' → 2. Kral olacak piyonunuzu seçin!'}
+                  {activeSpell==='MIND_CONTROL' && ' → Saf değiştirecek rakip piyonu seçin!'}
+                </span>
+                <button
+                  onClick={()=>{ setActiveSpell(null); setSelectedPos(null); addLog('🪄 Büyü iptal edildi.'); }}
+                  style={{
+                    padding:'0.2rem 0.6rem',
+                    fontSize:'0.75rem',
+                    borderRadius:'4px',
+                    border:'1px solid rgba(255,255,255,0.2)',
+                    background:'rgba(239,68,68,0.4)',
+                    color:'#fff',
+                    cursor:'pointer',
+                    fontWeight:'800'
+                  }}
+                >
+                  İptal Et
+                </button>
+              </div>
+            )}
+
             {/* YÜKSEK KONTRASTLI KLASİK CEVİZ & KREM SATRANÇ TAHTASI (MAVİ YOK) */}
             <div style={{
               display:'grid',
@@ -1016,6 +1322,7 @@ export default function KuantumSatranc({onGameComplete}){
                 const isDark=(r+c)%2===1;
                 const isSel=selectedPos?.[0]===r&&selectedPos?.[1]===c;
                 const isTarget=validMoves.some(([vr,vc])=>vr===r&&vc===c);
+                const isTeleportDest=activeSpell==='TELEPORT'&&validTeleportSquares.some(([vr,vc])=>vr===r&&vc===c);
                 const isShielded=Boolean(cell && shieldedSquares.has(ck));
                 const isKingChk=ck===playerKingKey&&isPlayerInCheck;
                 const isFrozen=Boolean(cell && frozenPieces[ck]&&frozenPieces[ck]>0);
@@ -1064,6 +1371,19 @@ export default function KuantumSatranc({onGameComplete}){
                         background:cell?'rgba(220, 38, 38, 0.3)':'#16a34a',
                         border:cell?'3.5px solid #dc2626':'none',
                         boxShadow:cell?'0 0 10px rgba(220, 38, 38, 0.8)':'0 0 8px #16a34a',
+                        pointerEvents:'none',
+                        zIndex:1
+                      }}/>
+                    )}
+                    {isTeleportDest&&(
+                      <div style={{
+                        position:'absolute',
+                        width:'32%',
+                        height:'32%',
+                        borderRadius:'50%',
+                        background:'rgba(168, 85, 247, 0.5)',
+                        border:'2.5px solid #c084fc',
+                        boxShadow:'0 0 10px #a855f7',
                         pointerEvents:'none',
                         zIndex:1
                       }}/>
