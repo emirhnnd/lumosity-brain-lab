@@ -879,7 +879,11 @@ export default function KuantumSatranc({onGameComplete}){
       setEnergyOrbs(o=>Math.max(0,o-1));
       return;
     }
-    if(spellId==='RULE_CHANGE'){setShowRuleModal(true);return;}
+    if(spellId==='RULE_CHANGE'){
+      if(energyOrbs<2){ soundService.error?.(); addLog('⚠️ Kural değişikliği için 2 Orb gereklidir!'); return; }
+      setShowRuleModal(true);
+      return;
+    }
     if(activeSpell===spellId){
       setActiveSpell(null);
       setSelectedPos(null);
@@ -1085,12 +1089,20 @@ export default function KuantumSatranc({onGameComplete}){
       }
       const nb=board.map(row=>[...row]);
       nb[r][c]=playerColor+'Q';
+      if(isInCheck(playerColor,nb)){
+        soundService.error?.();
+        addLog('⚠️ Bu terfi Şahınızı açıkta bırakıyor! Başka bir piyon seçin veya önce Şahı koruyun.');
+        return;
+      }
       setBoard(nb);
       soundService.levelUp?.();
       addLog(`♕ Piyon başarıyla Vezir'e (${PIECES[playerColor+'Q']}) terfi etti!`);
       consumeOrb(2);
       setTurnTimeLeft(TURN_TIME);
-      afterMoveChecks(nb,playerColor,lastMove,castlingRights);
+      const okA=afterMoveChecks(nb,playerColor,lastMove,castlingRights);
+      if(!okA) return;
+      setPlayerTurn(aiColor);
+      setTimeout(()=>triggerAiMove(nb,captureProgress,energyOrbs-2,castlingRights,lastMove,shieldedSquares,frozenPieces,aiCaptureProgress,aiEnergyOrbs,aiColor,playerColor),600);
       return;
     }
 
@@ -1119,12 +1131,20 @@ export default function KuantumSatranc({onGameComplete}){
       }
       const nb=board.map(row=>[...row]);
       nb[r][c]=playerColor+'K';
+      if(isInCheck(playerColor,nb)){
+        soundService.error?.();
+        addLog('⚠️ Bu terfi Şahınızı açıkta bırakıyor! Başka bir piyon seçin veya önce Şahı koruyun.');
+        return;
+      }
       setBoard(nb);
       soundService.levelUp?.();
       addLog(`👑 Piyonunuz İKİNCİ KRAL (${PIECES[playerColor+'K']}) oldu! Tahtta 2 Kralınız var!`);
       consumeOrb(3);
       setTurnTimeLeft(TURN_TIME);
-      afterMoveChecks(nb,playerColor,lastMove,castlingRights);
+      const okKA=afterMoveChecks(nb,playerColor,lastMove,castlingRights);
+      if(!okKA) return;
+      setPlayerTurn(aiColor);
+      setTimeout(()=>triggerAiMove(nb,captureProgress,energyOrbs-3,castlingRights,lastMove,shieldedSquares,frozenPieces,aiCaptureProgress,aiEnergyOrbs,aiColor,playerColor),600);
       return;
     }
 
@@ -1153,12 +1173,20 @@ export default function KuantumSatranc({onGameComplete}){
       }
       const nb=board.map(row=>[...row]);
       nb[r][c]=playerColor+'P';
+      if(isInCheck(playerColor,nb)){
+        soundService.error?.();
+        addLog('⚠️ Bu piyon şu an Şahınızı koruyor, hipnoz onu oradan kaldırarak Şahı açıkta bırakır!');
+        return;
+      }
       setBoard(nb);
       soundService.spellCast?.();
       addLog('🧠 ZİHİN KONTROLÜ! Rakip piyon saf değiştirdi ve artık sizin ordunuzda!');
       consumeOrb(3);
       setTurnTimeLeft(TURN_TIME);
-      afterMoveChecks(nb,playerColor,lastMove,castlingRights);
+      const okMC=afterMoveChecks(nb,playerColor,lastMove,castlingRights);
+      if(!okMC) return;
+      setPlayerTurn(aiColor);
+      setTimeout(()=>triggerAiMove(nb,captureProgress,energyOrbs-3,castlingRights,lastMove,shieldedSquares,frozenPieces,aiCaptureProgress,aiEnergyOrbs,aiColor,playerColor),600);
       return;
     }
 
@@ -1166,6 +1194,7 @@ export default function KuantumSatranc({onGameComplete}){
   };
 
   const applyRuleChange=(rule)=>{
+    if(!isPlaying||gameOver||playerTurn!==playerColor||pendingPromotion) return;
     setActiveRules(prev=>({...prev,[rule.id]:rule.turns}));
     setShowRuleModal(false);soundService.spellCast?.();setEnergyOrbs(o=>Math.max(0,o-2));
     addLog(`🔀 KURAL: ${rule.emoji} ${rule.name} (${rule.turns} tur)!`);
