@@ -595,12 +595,26 @@ export default function KuantumSatranc({onGameComplete}){
     if (tp && nextMC[tk]) delete nextMC[tk]; // captured mind-ctrl pawn → removed
     setMindControlledSquares(nextMC);
 
-    // Check for player pawn promotion — BLOCKED if mind-controlled (nerf)
+    // Check for player pawn promotion
     const isPromotion=(playerColor==='w'&&mp==='wP'&&tr===0)||(playerColor==='b'&&mp==='bP'&&tr===7);
     if(isPromotion){
       if(nextMC[tk]){
-        addLog('🧠 Hipnozlu piyon son hatta ulaştı ama safları değiştirdiği için terfi edemez!');
-        // Pawn stays as pawn, no promotion menu — just continue
+        // Mind-controlled pawn auto-promotes to Rook (nerf: can't become Queen)
+        const promotedBoard=newBoard.map(row=>[...row]);
+        promotedBoard[tr][tc]=playerColor+'R';
+        setBoard(promotedBoard);
+        soundService.levelUp?.();
+        addLog(`🧠♜ Hipnozlu piyon otomatik olarak Kale'ye dönüştü! (Vezir'e terfi edemez)`);
+        const okMCP=afterMoveChecks(promotedBoard,playerColor,newMR,castlingRights);if(!okMCP) return;
+        if(isInCheck(aiColor,promotedBoard)) addLog(`⚠️ ${aiColor==='b'?'Siyah':'Beyaz'} Şah'a şah çekildi.`);
+        if(activeRules['DOUBLE_MOVE']>0){
+          setActiveRules(prev=>({...prev,DOUBLE_MOVE:prev.DOUBLE_MOVE-1}));
+          addLog('⚡ Çift Hamle devrede! Bir hamle hakkınız daha var!');
+          return;
+        }
+        setPlayerTurn(aiColor);
+        setTimeout(()=>triggerAiMove(promotedBoard,np,no,castlingRights,newMR,nextShields,nextFrozen,aiCaptureProgress,aiEnergyOrbs,aiColor,playerColor),600);
+        return;
       } else {
         soundService.levelUp?.();
         setPendingPromotion({r:tr,c:tc,boardSnap:newBoard,moveRec:newMR});
