@@ -385,7 +385,7 @@ export default function KuantumSatranc({onGameComplete}){
   const[captureProgress,setCaptureProgress]=useState(0);
   const[energyOrbs,setEnergyOrbs]=useState(0);
   const[aiCaptureProgress,setAiCaptureProgress]=useState(0);
-  const[aiEnergyOrbs,setAiEnergyOrbs]=useState(1);
+  const[aiEnergyOrbs,setAiEnergyOrbs]=useState(0);
   const[frozenPieces,setFrozenPieces]=useState({});
   const[activeSpell,setActiveSpell]=useState(null);
   const[turnTimeLeft,setTurnTimeLeft]=useState(TURN_TIME);
@@ -462,7 +462,7 @@ export default function KuantumSatranc({onGameComplete}){
     setPlayerTurn('b');
 
     setCaptureProgress(0);setEnergyOrbs(0);
-    setAiCaptureProgress(0);setAiEnergyOrbs(1);
+    setAiCaptureProgress(0);setAiEnergyOrbs(0);
     setFrozenPieces({});
     setActiveSpell(null);
     setIsWhiteInCheck(false);setIsBlackInCheck(false);
@@ -478,7 +478,7 @@ export default function KuantumSatranc({onGameComplete}){
       // Player is White: AI is Black, so AI moves first!
       addLog('🎲 Kura sonucu: BEYAZ (♔) taşları aldınız!');
       addLog('⚔️ Siyahlar her zaman oyuna ilk başlar! AI (Siyah) açılışı yapıyor...');
-      setTimeout(()=>triggerAiMove(initialBoard,0,0,initialRights,null,new Set(),{},0,1,assignedAi,assignedPlayer),700);
+      setTimeout(()=>triggerAiMove(initialBoard,0,0,initialRights,null,{},{},0,0,assignedAi,assignedPlayer),700);
     }
   };
 
