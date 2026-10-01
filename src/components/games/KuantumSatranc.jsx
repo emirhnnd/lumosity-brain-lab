@@ -327,7 +327,7 @@ function evaluateAiMove(fr, fc, tr, tc, curBoard, cr, lastMove, shieldedSquares 
   return score;
 }
 
-function pickAiMove(pBoard, chaos, queenBanned, lastMove, cr, shieldedSquares = {}, frozenPieces = {}, aiColor = 'b') {
+function pickAiMove(pBoard, chaos, queenBanned, lastMove, cr, shieldedSquares = {}, frozenPieces = {}, aiColor = 'b', randomChance = 0) {
   const moves = [];
   for (let r = 0; r < 8; r++) {
     for (let c = 0; c < 8; c++) {
@@ -336,7 +336,7 @@ function pickAiMove(pBoard, chaos, queenBanned, lastMove, cr, shieldedSquares = 
         const ck = `${r}-${c}`;
         if (frozenPieces && frozenPieces[ck] > 0) continue;
         for (const [tr, tc] of getLegalMoves(r, c, pBoard, lastMove, cr, frozenPieces)) {
-          const score = chaos
+          const score = (chaos || Math.random() < randomChance)
             ? Math.random() * 50
             : evaluateAiMove(r, c, tr, tc, pBoard, cr, lastMove, shieldedSquares, frozenPieces, aiColor);
           moves.push({ fromR: r, fromC: c, toR: tr, toC: tc, score });
@@ -345,7 +345,7 @@ function pickAiMove(pBoard, chaos, queenBanned, lastMove, cr, shieldedSquares = 
     }
   }
   if (!moves.length) return null;
-  if (chaos) return moves[Math.floor(Math.random() * moves.length)];
+  if (chaos || Math.random() < randomChance) return moves[Math.floor(Math.random() * moves.length)];
   moves.sort((a, b) => b.score - a.score);
   const bestScore = moves[0].score;
   const topCands = moves.filter(m => m.score >= bestScore - 15);
@@ -372,6 +372,49 @@ const SPELLS=[
 ];
 
 function fmt(s){const m=Math.floor(s/60);return `${m}:${String(s%60).padStart(2,'0')}`;}
+
+// ─── ELO / Leaderboard helpers ────────────────────────────────────────────────
+const LS_BOARD = 'qs_leaderboard_v2';
+const LS_CURRENT = 'qs_current_player_v2';
+
+function loadLeaderboard() {
+  try { return JSON.parse(localStorage.getItem(LS_BOARD) || '[]'); } catch{ return []; }
+}
+function saveLeaderboard(arr) {
+  localStorage.setItem(LS_BOARD, JSON.stringify(arr));
+}
+function loadCurrentPlayer() {
+  try { return JSON.parse(localStorage.getItem(LS_CURRENT) || 'null'); } catch{ return null; }
+}
+function saveCurrentPlayer(p) {
+  localStorage.setItem(LS_CURRENT, JSON.stringify(p));
+}
+
+function calcEloChange(playerElo, aiElo, result) {
+  const K = playerElo < 2100 ? 32 : playerElo < 2400 ? 24 : 16;
+  const expected = 1 / (1 + Math.pow(10, (aiElo - playerElo) / 400));
+  const score = result === 'win' ? 1 : result === 'draw' ? 0.5 : 0;
+  return Math.round(K * (score - expected));
+}
+
+function getAiDifficulty(playerElo) {
+  if (playerElo < 1000) return { label: '🟢 Başlangıç', randomChance: 0.50, aiElo: 700,  spellThreshold: 6 };
+  if (playerElo < 1200) return { label: '🟡 Acemi',      randomChance: 0.30, aiElo: 900,  spellThreshold: 4 };
+  if (playerElo < 1400) return { label: '🟠 Orta',       randomChance: 0.15, aiElo: 1100, spellThreshold: 3 };
+  if (playerElo < 1600) return { label: '🔴 İleri',      randomChance: 0.06, aiElo: 1300, spellThreshold: 2 };
+  if (playerElo < 1800) return { label: '🟣 Uzman',      randomChance: 0.02, aiElo: 1500, spellThreshold: 1 };
+  return                       { label: '⚫ Efsane',     randomChance: 0.00, aiElo: 1700, spellThreshold: 1 };
+}
+
+function eloLabel(elo) {
+  if (elo < 1000) return '🟢';
+  if (elo < 1200) return '🟡';
+  if (elo < 1400) return '🟠';
+  if (elo < 1600) return '🔴';
+  if (elo < 1800) return '🟣';
+  return '⚫';
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function KuantumSatranc({onGameComplete}){
   const[board,setBoard]=useState(makeInitialBoard);
@@ -404,6 +447,16 @@ export default function KuantumSatranc({onGameComplete}){
   const[gameOver,setGameOver]=useState(false);
   const[winnerMessage,setWinnerMessage]=useState('');
   const[battleLogs,setBattleLogs]=useState(["⚔️ Kuantum Satranç'a hoş geldiniz!"]);
+
+  // ─── ELO / Profile / Leaderboard state ───────────────────────────────────
+  const[playerProfile,setPlayerProfile]=useState(()=>loadCurrentPlayer());
+  const[showNameModal,setShowNameModal]=useState(false);
+  const[nameInput,setNameInput]=useState('');
+  const[showLeaderboard,setShowLeaderboard]=useState(false);
+  const[leaderboard,setLeaderboard]=useState(()=>loadLeaderboard());
+  const[eloChange,setEloChange]=useState(null); // {delta, newElo, result}
+  // ─────────────────────────────────────────────────────────────────────────
+
 
   const addLog=msg=>setBattleLogs(prev=>[msg,...prev.slice(0,7)]);
   const clearTimer=()=>{if(timerRef.current){clearInterval(timerRef.current);timerRef.current=null;}};
@@ -441,10 +494,43 @@ export default function KuantumSatranc({onGameComplete}){
     return clearTimer;
   },[playerTurn,isPlaying,gameOver,pendingPromotion,playerColor]); // eslint-disable-line
 
-  const endGame=(isWin,msg)=>{
+  const endGame=(isWin,msg,isDraw=false)=>{
     clearTimer();setIsPlaying(false);setGameOver(true);setWinnerMessage(msg);
     if(isWin) soundService.levelUp?.(); else soundService.error?.();
     if(onGameComplete) onGameComplete('kuantum_satranc','mantik',score+(isWin?1500:0),5);
+
+    // ─── ELO update ──────────────────────────────────────────────────────────
+    if(playerProfile){
+      const result = isDraw ? 'draw' : isWin ? 'win' : 'loss';
+      const diff = getAiDifficulty(playerProfile.elo);
+      const delta = calcEloChange(playerProfile.elo, diff.aiElo, result);
+      const newElo = Math.max(100, playerProfile.elo + delta);
+      const streak = isWin ? playerProfile.streak + 1 : 0;
+      const updated = {
+        ...playerProfile,
+        elo: newElo,
+        wins:   playerProfile.wins   + (isWin  && !isDraw ? 1 : 0),
+        losses: playerProfile.losses + (!isWin && !isDraw ? 1 : 0),
+        draws:  playerProfile.draws  + (isDraw             ? 1 : 0),
+        streak,
+        bestStreak: Math.max(playerProfile.bestStreak, streak),
+        totalGames: playerProfile.totalGames + 1,
+        lastPlayed: Date.now(),
+      };
+      setPlayerProfile(updated);
+      saveCurrentPlayer(updated);
+      setEloChange({ delta, newElo, result });
+
+      const board2 = loadLeaderboard();
+      const idx = board2.findIndex(p=>p.name===updated.name);
+      if(idx>=0) board2[idx]=updated; else board2.push(updated);
+      board2.sort((a,b)=>b.elo-a.elo);
+      saveLeaderboard(board2);
+      setLeaderboard(board2);
+    } else {
+      setEloChange(null);
+    }
+    // ─────────────────────────────────────────────────────────────────────────
   };
 
   const startGame=()=>{
@@ -468,7 +554,7 @@ export default function KuantumSatranc({onGameComplete}){
     setActiveSpell(null);
     setIsWhiteInCheck(false);setIsBlackInCheck(false);
     setShieldedSquares({});setMindControlledSquares({});setAiStunnedTurns(0);setActiveRules({});setShowRuleModal(false);
-    setScore(0);setGameOver(false);setIsPlaying(true);
+    setScore(0);setGameOver(false);setIsPlaying(true);setEloChange(null);
     setTurnTimeLeft(TURN_TIME);setTotalTimeLeft(TOTAL_TIME);
 
     if(assignedPlayer==='b'){
@@ -501,7 +587,7 @@ export default function KuantumSatranc({onGameComplete}){
     setIsWhiteInCheck(wChk);setIsBlackInCheck(bChk);
     if(!hasAnyLegalMove(opp,newBoard,moveRec,cr,frozenPieces,activeRules,playerColor)){
       if(isInCheck(opp,newBoard)) endGame(moverColor===playerColor,moverColor===playerColor?'🎉 Şah Mat! Kazandın!':'💀 Şah Mat! AI Kazandı!');
-      else endGame(false,'⚖️ Pat! Beraberlik.');
+      else endGame(false,'⚖️ Pat! Beraberlik.',true);
       return false;
     }
     return true;
@@ -771,7 +857,8 @@ export default function KuantumSatranc({onGameComplete}){
       }
     }
 
-    const move=pickAiMove(activeBoard,activeRules['CHAOS_AI']>0,activeRules['QUEEN_BAN']>0,lMove,cRights,activeShields,activeFrozen,curAiColor);
+    const aiDiff = playerProfile ? getAiDifficulty(playerProfile.elo) : { randomChance: 0.15 };
+    const move=pickAiMove(activeBoard,activeRules['CHAOS_AI']>0,activeRules['QUEEN_BAN']>0,lMove,cRights,activeShields,activeFrozen,curAiColor,aiDiff.randomChance);
     if(!move){setPlayerTurn(curPlayerColor);return;}
     const{fromR,fromC,toR,toC}=move,tp=activeBoard[toR][toC];
     const tk=`${toR}-${toC}`,moverPiece=activeBoard[fromR][fromC];
@@ -1301,6 +1388,42 @@ export default function KuantumSatranc({onGameComplete}){
         <p style={{fontSize:'0.8rem',color:'var(--text-muted)',margin:'0.3rem 0 0'}}>
           Kura ile Renk Belirleme · <strong>Her Zaman Siyah Başlar!</strong> · Yüksek Kontrastlı Tahta
         </p>
+
+        {/* ─── ELO / Profile Bar ─── */}
+        <div style={{display:'flex',justifyContent:'center',alignItems:'center',gap:'0.6rem',marginTop:'0.65rem',flexWrap:'wrap'}}>
+          {playerProfile ? (
+            <>
+              <span style={{background:'rgba(251,191,36,0.12)',border:'1px solid rgba(251,191,36,0.35)',borderRadius:'20px',padding:'0.25rem 0.75rem',fontSize:'0.78rem',fontWeight:'800',color:'#fbbf24'}}>
+                {eloLabel(playerProfile.elo)} {playerProfile.name}
+              </span>
+              <span style={{background:'rgba(99,102,241,0.14)',border:'1px solid rgba(99,102,241,0.35)',borderRadius:'20px',padding:'0.25rem 0.75rem',fontSize:'0.78rem',fontWeight:'800',color:'#a5b4fc'}}>
+                ⭐ {playerProfile.elo} ELO
+              </span>
+              <span style={{background:'rgba(16,185,129,0.1)',border:'1px solid rgba(16,185,129,0.3)',borderRadius:'20px',padding:'0.25rem 0.75rem',fontSize:'0.78rem',fontWeight:'700',color:'#6ee7b7'}}>
+                {getAiDifficulty(playerProfile.elo).label}
+              </span>
+              <span style={{fontSize:'0.75rem',color:'var(--text-muted)',fontWeight:'600'}}>
+                {playerProfile.wins}G / {playerProfile.losses}K / {playerProfile.draws}B
+              </span>
+              <button onClick={()=>{setShowLeaderboard(true);setLeaderboard(loadLeaderboard());}} style={{background:'rgba(99,102,241,0.15)',border:'1px solid rgba(99,102,241,0.4)',borderRadius:'20px',padding:'0.2rem 0.65rem',fontSize:'0.75rem',color:'#a5b4fc',cursor:'pointer',fontWeight:'700'}}>
+                🏆 Liderlik
+              </button>
+              <button onClick={()=>setShowNameModal(true)} style={{background:'rgba(255,255,255,0.05)',border:'1px solid rgba(255,255,255,0.15)',borderRadius:'20px',padding:'0.2rem 0.65rem',fontSize:'0.75rem',color:'var(--text-muted)',cursor:'pointer'}}>
+                👤 Değiştir
+              </button>
+            </>
+          ) : (
+            <>
+              <span style={{fontSize:'0.8rem',color:'var(--text-muted)'}}>ELO takibi için profil oluşturun</span>
+              <button onClick={()=>setShowNameModal(true)} style={{background:'rgba(251,191,36,0.15)',border:'1px solid rgba(251,191,36,0.4)',borderRadius:'20px',padding:'0.25rem 0.85rem',fontSize:'0.8rem',color:'#fbbf24',cursor:'pointer',fontWeight:'800'}}>
+                👤 Profil Oluştur
+              </button>
+              <button onClick={()=>{setShowLeaderboard(true);setLeaderboard(loadLeaderboard());}} style={{background:'rgba(99,102,241,0.15)',border:'1px solid rgba(99,102,241,0.4)',borderRadius:'20px',padding:'0.25rem 0.65rem',fontSize:'0.8rem',color:'#a5b4fc',cursor:'pointer',fontWeight:'700'}}>
+                🏆 Liderlik
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {isPlaying&&isPlayerInCheck&&(
@@ -1614,12 +1737,34 @@ export default function KuantumSatranc({onGameComplete}){
               <Award size={50} color="var(--accent-light)" style={{marginBottom:'0.5rem'}}/>
               <h3 style={{fontSize:'1.4rem',marginBottom:'0.45rem'}}>{winnerMessage}</h3>
               <p style={{fontSize:'1.1rem',color:'var(--success)',fontWeight:'700'}}>Skor: {score}</p>
+              {/* ELO Change Card */}
+              {eloChange&&(
+                <div style={{margin:'0.8rem auto',maxWidth:'280px',background:eloChange.delta>=0?'rgba(16,185,129,0.12)':'rgba(239,68,68,0.12)',border:`1.5px solid ${eloChange.delta>=0?'rgba(16,185,129,0.5)':'rgba(239,68,68,0.5)'}`,borderRadius:'var(--radius-lg)',padding:'0.8rem 1.2rem'}}>
+                  <div style={{fontSize:'0.72rem',color:'var(--text-muted)',marginBottom:'0.3rem'}}>ELO Değişimi</div>
+                  <div style={{display:'flex',justifyContent:'center',alignItems:'center',gap:'0.8rem'}}>
+                    <span style={{fontSize:'1.6rem',fontWeight:'900',color:eloChange.delta>=0?'#10b981':'#ef4444'}}>
+                      {eloChange.delta>=0?'+':''}{eloChange.delta}
+                    </span>
+                    <span style={{fontSize:'0.85rem',color:'var(--text-muted)'}}>→</span>
+                    <span style={{fontSize:'1.3rem',fontWeight:'900',color:'#fbbf24'}}>⭐{eloChange.newElo}</span>
+                  </div>
+                  <div style={{fontSize:'0.7rem',color:'var(--text-muted)',marginTop:'0.3rem'}}>
+                    {getAiDifficulty(eloChange.newElo).label} · {playerProfile?.wins}G {playerProfile?.losses}K {playerProfile?.draws}B
+                    {playerProfile?.streak>1&&<span style={{color:'#f59e0b'}}> · 🔥{playerProfile.streak} seri</span>}
+                  </div>
+                </div>
+              )}
             </div>
           ):(
             <p style={{fontSize:'0.9rem',color:'var(--text-muted)',marginBottom:'1.5rem',lineHeight:1.65}}>
               Beyin jimnastiği satrancı — hızlı karar, büyülü güçler!<br/>
               <strong>Rastgele Renk · Siyah İlk Başlar · Yüksek Kontrastlı Kareler!</strong>
             </p>
+          )}
+          {!playerProfile&&(
+            <button onClick={()=>setShowNameModal(true)} style={{display:'block',width:'100%',maxWidth:'300px',margin:'0 auto 0.65rem',padding:'0.6rem',background:'rgba(251,191,36,0.12)',border:'1px solid rgba(251,191,36,0.35)',borderRadius:'var(--radius-md)',color:'#fbbf24',cursor:'pointer',fontWeight:'700',fontSize:'0.85rem'}}>
+              👤 Profil Oluştur (ELO takibi için)
+            </button>
           )}
           <button className="btn-primary" onClick={startGame} style={{width:'100%',maxWidth:'300px',padding:'0.9rem',fontSize:'1rem'}}>
             <Play size={19}/> {gameOver?'Yeniden Oyna':'Kuantum Satranç Başlat'}
@@ -1656,6 +1801,71 @@ export default function KuantumSatranc({onGameComplete}){
               ))}
               <button className="btn-primary" onClick={()=>handleSelectPromotion('K')} disabled={energyOrbs<3} style={{fontSize:'1.05rem',padding:'0.4rem 0.75rem',background:energyOrbs>=3?'linear-gradient(135deg,#ef4444,#fbbf24)':'rgba(255,255,255,0.05)',border:'none',opacity:energyOrbs>=3?1:0.4}}>♔ 2. Kral (3⚡)</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showNameModal&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.85)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:10000,padding:'1rem'}}>
+          <div style={{background:'linear-gradient(135deg,#1e293b,#0f172a)',border:'2px solid #fbbf24',borderRadius:'var(--radius-lg)',padding:'1.6rem',maxWidth:'360px',width:'100%',boxShadow:'0 0 50px rgba(251,191,36,0.3)',textAlign:'center'}}>
+            <div style={{fontSize:'2.5rem',marginBottom:'0.5rem'}}>👤</div>
+            <h3 style={{fontSize:'1.1rem',color:'#fbbf24',marginBottom:'0.2rem'}}>Profil Oluştur / Giriş Yap</h3>
+            <p style={{fontSize:'0.75rem',color:'var(--text-muted)',marginBottom:'1rem'}}>ELO ve liderlik tablosu için adınızı girin. Aynı isimle girişte kayıtlı verileriniz yüklenir.</p>
+            <input value={nameInput} onChange={e=>setNameInput(e.target.value.slice(0,20))} placeholder="Adınız (min 2 karakter)"
+              style={{width:'100%',padding:'0.65rem 0.9rem',background:'rgba(255,255,255,0.07)',border:'1.5px solid rgba(251,191,36,0.4)',borderRadius:'var(--radius-md)',color:'#fff',fontSize:'0.95rem',outline:'none',boxSizing:'border-box',marginBottom:'0.75rem'}} autoFocus/>
+            <div style={{display:'flex',gap:'0.5rem'}}>
+              <button onClick={()=>{
+                const n=nameInput.trim();if(n.length<2)return;
+                const lb=loadLeaderboard();const existing=lb.find(p=>p.name===n);
+                const profile=existing||{name:n,elo:1000,wins:0,losses:0,draws:0,streak:0,bestStreak:0,totalGames:0,lastPlayed:Date.now()};
+                setPlayerProfile(profile);saveCurrentPlayer(profile);
+                if(!existing){lb.push(profile);lb.sort((a,b)=>b.elo-a.elo);saveLeaderboard(lb);}
+                setLeaderboard(loadLeaderboard());setShowNameModal(false);setNameInput('');
+              }} disabled={nameInput.trim().length<2}
+              style={{flex:1,padding:'0.6rem',background:nameInput.trim().length>=2?'linear-gradient(135deg,#fbbf24,#f59e0b)':'rgba(255,255,255,0.05)',border:'none',borderRadius:'var(--radius-md)',color:nameInput.trim().length>=2?'#000':'var(--text-muted)',fontWeight:'800',cursor:nameInput.trim().length>=2?'pointer':'not-allowed',fontSize:'0.9rem'}}>Kaydet / Giriş</button>
+              <button onClick={()=>{setShowNameModal(false);setNameInput('');}} style={{padding:'0.6rem 1rem',background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:'var(--radius-md)',color:'var(--text-muted)',cursor:'pointer',fontSize:'0.85rem'}}>İptal</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showLeaderboard&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.88)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:10000,padding:'1rem'}} onClick={()=>setShowLeaderboard(false)}>
+          <div style={{background:'linear-gradient(135deg,#1e293b,#0f172a)',border:'2px solid #6366f1',borderRadius:'var(--radius-lg)',padding:'1.4rem',maxWidth:'520px',width:'100%',boxShadow:'0 0 50px rgba(99,102,241,0.35)',maxHeight:'85vh',overflowY:'auto'}} onClick={e=>e.stopPropagation()}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1rem'}}>
+              <h3 style={{fontSize:'1.15rem',color:'#a5b4fc',margin:0}}>🏆 Liderlik Tablosu</h3>
+              <button onClick={()=>setShowLeaderboard(false)} style={{background:'transparent',border:'none',color:'var(--text-muted)',cursor:'pointer',fontSize:'1.2rem'}}>✕</button>
+            </div>
+            {leaderboard.length===0
+              ?<p style={{textAlign:'center',color:'var(--text-muted)',fontSize:'0.85rem'}}>Henüz kayıtlı oyuncu yok. Profil oluştur ve oyna!</p>
+              :<div style={{display:'flex',flexDirection:'column',gap:'0.45rem'}}>
+                {leaderboard.map((p,i)=>{
+                  const isMe=playerProfile&&p.name===playerProfile.name;
+                  const wr=p.totalGames>0?((p.wins/p.totalGames)*100).toFixed(0):0;
+                  const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':`${i+1}.`;
+                  return(
+                    <div key={p.name} style={{display:'flex',alignItems:'center',gap:'0.6rem',padding:'0.65rem 0.8rem',
+                      background:isMe?'rgba(99,102,241,0.18)':'rgba(255,255,255,0.03)',
+                      border:`1.5px solid ${isMe?'#6366f1':'rgba(255,255,255,0.08)'}`,borderRadius:'var(--radius-md)'}}>
+                      <span style={{fontSize:'1rem',minWidth:'2rem',textAlign:'center'}}>{medal}</span>
+                      <div style={{flex:1}}>
+                        <div style={{fontWeight:'800',fontSize:'0.88rem',color:isMe?'#a5b4fc':'#f1f5f9'}}>{eloLabel(p.elo)} {p.name}{isMe?' (Sen)':''}</div>
+                        <div style={{fontSize:'0.7rem',color:'var(--text-muted)',marginTop:'0.1rem'}}>
+                          {p.wins}G {p.losses}K {p.draws}B · %{wr} · 🔥{p.bestStreak} seri · {p.totalGames} oyun
+                        </div>
+                      </div>
+                      <div style={{textAlign:'right'}}>
+                        <div style={{fontWeight:'900',fontSize:'1rem',color:'#fbbf24'}}>⭐{p.elo}</div>
+                        <div style={{fontSize:'0.65rem',color:'var(--text-muted)'}}>{getAiDifficulty(p.elo).label}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            }
+            <button onClick={()=>{setShowLeaderboard(false);setShowNameModal(true);}} style={{width:'100%',marginTop:'1rem',padding:'0.55rem',background:'rgba(251,191,36,0.12)',border:'1px solid rgba(251,191,36,0.3)',borderRadius:'var(--radius-md)',color:'#fbbf24',cursor:'pointer',fontWeight:'700',fontSize:'0.85rem'}}>
+              + Yeni Profil / Giriş Yap
+            </button>
           </div>
         </div>
       )}
