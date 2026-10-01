@@ -395,6 +395,7 @@ export default function KuantumSatranc({onGameComplete}){
   const[isWhiteInCheck,setIsWhiteInCheck]=useState(false);
   const[isBlackInCheck,setIsBlackInCheck]=useState(false);
   const[shieldedSquares,setShieldedSquares]=useState({});
+  const[mindControlledSquares,setMindControlledSquares]=useState({});
   const[aiStunnedTurns,setAiStunnedTurns]=useState(0);
   const[activeRules,setActiveRules]=useState({});
   const[showRuleModal,setShowRuleModal]=useState(false);
@@ -466,7 +467,7 @@ export default function KuantumSatranc({onGameComplete}){
     setFrozenPieces({});
     setActiveSpell(null);
     setIsWhiteInCheck(false);setIsBlackInCheck(false);
-    setShieldedSquares({});setAiStunnedTurns(0);setActiveRules({});setShowRuleModal(false);
+    setShieldedSquares({});setMindControlledSquares({});setAiStunnedTurns(0);setActiveRules({});setShowRuleModal(false);
     setScore(0);setGameOver(false);setIsPlaying(true);
     setTurnTimeLeft(TURN_TIME);setTotalTimeLeft(TOTAL_TIME);
 
@@ -588,13 +589,24 @@ export default function KuantumSatranc({onGameComplete}){
     }
     setFrozenPieces(nextFrozen);
 
-    // Check for player pawn promotion
+    // Track mind-controlled pawn movement (key follows piece)
+    let nextMC = { ...mindControlledSquares };
+    if (nextMC[sk]) { nextMC[tk] = true; delete nextMC[sk]; }
+    if (tp && nextMC[tk]) delete nextMC[tk]; // captured mind-ctrl pawn → removed
+    setMindControlledSquares(nextMC);
+
+    // Check for player pawn promotion — BLOCKED if mind-controlled (nerf)
     const isPromotion=(playerColor==='w'&&mp==='wP'&&tr===0)||(playerColor==='b'&&mp==='bP'&&tr===7);
     if(isPromotion){
-      soundService.levelUp?.();
-      setPendingPromotion({r:tr,c:tc,boardSnap:newBoard,moveRec:newMR});
-      addLog('🌟 PİYON TERFİİ! Taş seçin!');
-      return;
+      if(nextMC[tk]){
+        addLog('🧠 Hipnozlu piyon son hatta ulaştı ama safları değiştirdiği için terfi edemez!');
+        // Pawn stays as pawn, no promotion menu — just continue
+      } else {
+        soundService.levelUp?.();
+        setPendingPromotion({r:tr,c:tc,boardSnap:newBoard,moveRec:newMR});
+        addLog('🌟 PİYON TERFİİ! Taş seçin!');
+        return;
+      }
     }
 
     const ok=afterMoveChecks(newBoard,playerColor,newMR,castlingRights);if(!ok) return;
@@ -1178,9 +1190,12 @@ export default function KuantumSatranc({onGameComplete}){
         addLog('⚠️ Bu piyon şu an Şahınızı koruyor, hipnoz onu oradan kaldırarak Şahı açıkta bırakır!');
         return;
       }
+      // Register as mind-controlled (cannot promote)
+      const nextMC = { ...mindControlledSquares, [key]: true };
+      setMindControlledSquares(nextMC);
       setBoard(nb);
       soundService.spellCast?.();
-      addLog('🧠 ZİHİN KONTROLÜ! Rakip piyon saf değiştirdi ve artık sizin ordunuzda!');
+      addLog('🧠 ZİHİN KONTROLÜ! Rakip piyon saf değiştirdi! Bu piyon terfi edemez.');
       consumeOrb(3);
       setTurnTimeLeft(TURN_TIME);
       const okMC=afterMoveChecks(nb,playerColor,lastMove,castlingRights);
@@ -1426,6 +1441,7 @@ export default function KuantumSatranc({onGameComplete}){
                 const isShielded=Boolean(cell && (shieldedSquares[ck]>0 || (shieldedSquares.has && shieldedSquares.has(ck))));
                 const isKingChk=ck===playerKingKey&&isPlayerInCheck;
                 const isFrozen=Boolean(cell && frozenPieces[ck]&&frozenPieces[ck]>0);
+                const isMindControlled=Boolean(cell && mindControlledSquares[ck]);
                 const isLast=lastMove&&((lastMove.fr===r&&lastMove.fc===c)||(lastMove.tr===r&&lastMove.tc===c));
 
                 // Yüksek Kontrastlı Klasik Ahşap Paleti (Ceviz & Krem - MAVİ KESİNLİKLE YOK)
@@ -1458,8 +1474,8 @@ export default function KuantumSatranc({onGameComplete}){
                       position:'relative',
                       userSelect:'none',
                       transition:'all 0.12s',
-                      boxShadow:isKingChk?'0 0 12px #ef4444':isShielded?'0 0 12px rgba(234, 88, 12, 0.85)':isFrozen?'0 0 10px rgba(255, 255, 255, 0.8)':'none',
-                      border:isShielded?'2.5px solid #ea580c':isFrozen?'2.5px solid #94a3b8':isSel?'2.5px solid #b45309':isLast?'2px solid #d97706':'1px solid rgba(0,0,0,0.08)'
+                      boxShadow:isKingChk?'0 0 12px #ef4444':isShielded?'0 0 12px rgba(234, 88, 12, 0.85)':isFrozen?'0 0 10px rgba(255, 255, 255, 0.8)':isMindControlled?'0 0 12px rgba(192, 38, 211, 0.9)':'none',
+                      border:isShielded?'2.5px solid #ea580c':isFrozen?'2.5px solid #94a3b8':isMindControlled?'2.5px solid #c026d3':isSel?'2.5px solid #b45309':isLast?'2px solid #d97706':'1px solid rgba(0,0,0,0.08)'
                     }}
                   >
                     {isTarget&&(
@@ -1499,6 +1515,7 @@ export default function KuantumSatranc({onGameComplete}){
                     </span>
                     {isShielded&&<div style={{position:'absolute',top:'1px',right:'2px',fontSize:'0.65rem',zIndex:3,filter:'drop-shadow(0 0 2px #ea580c)'}} title="Kalkan Koruma (1 Tur)">🛡️</div>}
                     {isFrozen&&<div style={{position:'absolute',top:'1px',left:'2px',fontSize:'0.65rem',zIndex:3,filter:'drop-shadow(0 0 2px #94a3b8)'}} title="Donduruldu">❄️</div>}
+                    {isMindControlled&&<div style={{position:'absolute',bottom:'1px',right:'2px',fontSize:'0.6rem',zIndex:3,filter:'drop-shadow(0 0 3px #c026d3)'}} title="Hipnozlu Piyon - Terfi edemez">🧠</div>}
                   </div>
                 );
               }))}
