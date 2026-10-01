@@ -573,15 +573,16 @@ export default function KuantumSatranc({onGameComplete}){
     } else {soundService.click?.();if(isCastle) addLog('🏰 Rok Yapıldı!');}
     setCaptureProgress(np);setEnergyOrbs(no);setBoard(newBoard);
 
-    // Unfreeze tick for AI pieces
+    // Unfreeze tick for Player pieces (they just served 1 turn frozen)
     let nextFrozen = {};
     for (const [k, turns] of Object.entries(frozenPieces)) {
       const [pr, pc] = k.split('-').map(Number);
       const p = newBoard[pr]?.[pc];
-      if (p && p[0] === aiColor) {
+      if (!p) continue;
+      if (p[0] === playerColor) {
         if (turns - 1 > 0) nextFrozen[k] = turns - 1;
-        else addLog(`❄️ ${aiColor==='b'?'Siyah':'Beyaz'} ${PIECES[p]} buzları eridi!`);
-      } else if (p && p[0] === playerColor) {
+        else addLog(`❄️ ${playerColor==='w'?'Beyaz':'Siyah'} ${PIECES[p]} buzları eridi!`);
+      } else if (p[0] === aiColor) {
         nextFrozen[k] = turns;
       }
     }
@@ -843,16 +844,17 @@ export default function KuantumSatranc({onGameComplete}){
     else if(moverPiece[1]==='K'&&Math.abs(fromC-toC)===2) addLog('🏰 AI Rok Yaptı!');
     setBoard(newBoard);
 
-    // Unfreeze tick for Player pieces
+    // Unfreeze tick for AI pieces (they just served 1 turn frozen)
     setFrozenPieces(prev => {
       const next = {};
       for (const [k, turns] of Object.entries(prev)) {
         const [pr, pc] = k.split('-').map(Number);
         const p = newBoard[pr]?.[pc];
-        if (p && p[0] === curPlayerColor) {
+        if (!p) continue;
+        if (p[0] === curAiColor) {
           if (turns - 1 > 0) next[k] = turns - 1;
-          else addLog(`❄️ ${curPlayerColor==='w'?'Beyaz':'Siyah'} ${PIECES[p]} buzları eridi!`);
-        } else if (p && p[0] === curAiColor) {
+          else addLog(`❄️ ${curAiColor==='b'?'Siyah':'Beyaz'} ${PIECES[p]} buzları eridi!`);
+        } else if (p[0] === curPlayerColor) {
           next[k] = turns;
         }
       }
@@ -867,16 +869,15 @@ export default function KuantumSatranc({onGameComplete}){
   const consumeOrb=(cost)=>{setEnergyOrbs(o=>Math.max(0,o-cost));setActiveSpell(null);setSelectedPos(null);setValidMoves([]);};
 
   const handleSpellButton=(spellId)=>{
+    if(!isPlaying||gameOver||playerTurn!==playerColor||pendingPromotion) return;
     if(spellId==='ADD_TIME'){
       if(energyOrbs<1) return;
-      clearTimer();
-      const nt=Math.min(turnTimeLeft+10,TURN_TIME+10),nto=Math.min(totalTimeLeft+10,TOTAL_TIME);
+      const nt=Math.min(turnTimeLeft+10,TURN_TIME+25),nto=Math.min(totalTimeLeft+10,TOTAL_TIME);
       setTurnTimeLeft(nt);setTotalTimeLeft(nto);
-      timerRef.current=setInterval(()=>{
-        setTurnTimeLeft(p=>{if(p<=1){clearTimer();return 0;}return p-1;});
-        setTotalTimeLeft(p=>{if(p<=1){clearTimer();return 0;}return p-1;});
-      },1000);
-      soundService.spellCast?.();addLog(`⏱️ +10sn eklendi! (Kalan: ${nt}sn)`);setEnergyOrbs(o=>Math.max(0,o-1));return;
+      soundService.spellCast?.();
+      addLog(`⏱️ +10sn düşünme süresi eklendi! (Kalan: ${nt}sn)`);
+      setEnergyOrbs(o=>Math.max(0,o-1));
+      return;
     }
     if(spellId==='RULE_CHANGE'){setShowRuleModal(true);return;}
     if(activeSpell===spellId){
@@ -1516,7 +1517,8 @@ export default function KuantumSatranc({onGameComplete}){
               <h4 style={{fontSize:'0.85rem',color:'var(--text-muted)',marginBottom:'0.65rem',marginTop:0}}>🪄 Büyüler</h4>
               <div style={{display:'flex',gap:'0.4rem',flexWrap:'wrap'}}>
                 {SPELLS.map(spell=>{
-                  const active=activeSpell===spell.id,can=energyOrbs>=spell.cost;
+                  const active=activeSpell===spell.id;
+                  const can=isPlaying && !gameOver && playerTurn===playerColor && !pendingPromotion && energyOrbs>=spell.cost;
                   return(
                     <button key={spell.id} onClick={()=>can&&handleSpellButton(spell.id)} disabled={!can} style={{flex:'1 1 44%',padding:'0.5rem 0.3rem',fontSize:'0.72rem',fontWeight:'700',borderRadius:'var(--radius-md)',border:`2px solid ${active?spell.color:'rgba(255,255,255,0.12)'}`,background:active?spell.color+'28':'rgba(255,255,255,0.04)',color:can?'#fff':'var(--text-muted)',cursor:can?'pointer':'not-allowed',opacity:can?1:0.35,transition:'all 0.2s',textAlign:'center'}}>
                       {spell.label}<br/><span style={{fontSize:'0.65rem',opacity:0.8}}>({spell.cost}⚡)</span>
