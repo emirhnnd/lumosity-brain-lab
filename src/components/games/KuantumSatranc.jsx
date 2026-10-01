@@ -7,7 +7,7 @@ const PIECES = {
   bP:'♟',bR:'♜',bN:'♞',bB:'♝',bQ:'♛',bK:'♚',
 };
 const PIECE_VALUES = { P:1,N:3,B:3,R:5,Q:9,K:100 };
-const TURN_TIME = 15, TOTAL_TIME = 180;
+const TURN_TIME = 35, TOTAL_TIME = 300;
 
 const makeInitialBoard = () => [
   ['bR','bN','bB','bQ','bK','bB','bN','bR'],
@@ -487,6 +487,19 @@ export default function KuantumSatranc({onGameComplete}){
     const isEP=mp[1]==='P'&&Math.abs(fc-tc)===1&&!tp;
     const isCastle=mp[1]==='K'&&Math.abs(fc-tc)===2;
     const sk=`${fr}-${fc}`,tk=`${tr}-${tc}`;
+
+    // Target piece is protected by enemy shield!
+    if(shieldedSquares.has(tk) && tp && tp.startsWith(aiColor)){
+      soundService.spellCast?.();
+      addLog(`🛡️ Düşman Kalkanı darbeyi emdi ve kırıldı! ${PIECES[tp]} saldırıdan korundu!`);
+      let nextShields = new Set(shieldedSquares);
+      nextShields.delete(tk);
+      setShieldedSquares(nextShields);
+      setPlayerTurn(aiColor);
+      setTimeout(()=>triggerAiMove(curBoard,curCap,curOrbs,cRights,lMove,nextShields,frozenPieces,aiCaptureProgress,aiEnergyOrbs,aiColor,playerColor),600);
+      return;
+    }
+
     const newBoard=applyMove(fr,fc,tr,tc,curBoard);
     updateRights(fr,fc,tr,tc,mp,tp);
 
@@ -494,8 +507,11 @@ export default function KuantumSatranc({onGameComplete}){
     if(nextShields.has(sk)){
       nextShields.delete(sk);
       nextShields.add(tk);
-      setShieldedSquares(nextShields);
     }
+    if(tp && nextShields.has(tk)){
+      nextShields.delete(tk);
+    }
+    setShieldedSquares(nextShields);
     const newMR={fr,fc,tr,tc};setLastMove(newMR);
     let np=curCap,no=curOrbs;
     if(tp||isEP){
@@ -700,6 +716,16 @@ export default function KuantumSatranc({onGameComplete}){
     }
     const newBoard=applyMove(fromR,fromC,toR,toC,activeBoard),newMR={fr:fromR,fc:fromC,tr:toR,tc:toC};
     updateRights(fromR,fromC,toR,toC,activeBoard[fromR][fromC],tp);setLastMove(newMR);
+
+    const sk=`${fromR}-${fromC}`;
+    if(activeShields.has(sk)){
+      activeShields.delete(sk);
+      activeShields.add(tk);
+    }
+    if(tp && activeShields.has(tk) && !activeShields.has(sk)){
+      activeShields.delete(tk);
+    }
+    setShieldedSquares(new Set(activeShields));
     
     // AI Pawn auto-queen promotion upon reaching opposite end rank
     if(moverPiece==='bP'&&toR===7){newBoard[toR][toC]='bQ';addLog('♛ AI Piyonu Vezire terfi etti!');}
@@ -794,15 +820,16 @@ export default function KuantumSatranc({onGameComplete}){
         soundService.spellCast?.();
         addLog(`🛡️ Kalkan ${PIECES[piece]} taşına uygulandı!`);
         consumeOrb(1);
+        setTurnTimeLeft(TURN_TIME); // Tam düşünme süresi ver
       } else {
         addLog('⚠️ Yalnızca kendi taşlarınıza kalkan takabilirsiniz.');
       }
     } else if(activeSpell==='ASCEND'){
-      if(piece===playerColor+'P'){const nb=board.map(row=>[...row]);nb[r][c]=playerColor+'Q';setBoard(nb);soundService.levelUp?.();addLog(`♕ Piyon → Vezir (${PIECES[playerColor+'Q']})!`);consumeOrb(2);}
+      if(piece===playerColor+'P'){const nb=board.map(row=>[...row]);nb[r][c]=playerColor+'Q';setBoard(nb);soundService.levelUp?.();addLog(`♕ Piyon → Vezir (${PIECES[playerColor+'Q']})!`);consumeOrb(2);setTurnTimeLeft(TURN_TIME);}
     } else if(activeSpell==='KING_ASCEND'){
-      if(piece===playerColor+'P'&&energyOrbs>=3){const nb=board.map(row=>[...row]);nb[r][c]=playerColor+'K';setBoard(nb);soundService.levelUp?.();addLog(`👑 Piyon → İkinci Kral (${PIECES[playerColor+'K']})!`);consumeOrb(3);}
+      if(piece===playerColor+'P'&&energyOrbs>=3){const nb=board.map(row=>[...row]);nb[r][c]=playerColor+'K';setBoard(nb);soundService.levelUp?.();addLog(`👑 Piyon → İkinci Kral (${PIECES[playerColor+'K']})!`);consumeOrb(3);setTurnTimeLeft(TURN_TIME);}
     } else if(activeSpell==='MIND_CONTROL'){
-      if(piece===aiColor+'P'&&energyOrbs>=3){const nb=board.map(row=>[...row]);nb[r][c]=playerColor+'P';setBoard(nb);soundService.spellCast?.();addLog('🧠 Hipnoz! Rakip piyon saf değiştirdi!');consumeOrb(3);afterMoveChecks(nb,playerColor,lastMove,castlingRights);}
+      if(piece===aiColor+'P'&&energyOrbs>=3){const nb=board.map(row=>[...row]);nb[r][c]=playerColor+'P';setBoard(nb);soundService.spellCast?.();addLog('🧠 Hipnoz! Rakip piyon saf değiştirdi!');consumeOrb(3);afterMoveChecks(nb,playerColor,lastMove,castlingRights);setTurnTimeLeft(TURN_TIME);}
     } else if(activeSpell==='FREEZE'){
       if(!piece){setActiveSpell(null);return;}
       if(piece[1]==='K'){
@@ -816,6 +843,7 @@ export default function KuantumSatranc({onGameComplete}){
         soundService.spellCast?.();
         addLog(`❄️ ${PIECES[piece]} 2 tur donduruldu!`);
         consumeOrb(1);
+        setTurnTimeLeft(TURN_TIME);
       } else {
         addLog('⚠️ Yalnızca rakip taşları dondurabilirsiniz (Şah hariç).');
       }
@@ -827,12 +855,18 @@ export default function KuantumSatranc({onGameComplete}){
     setActiveRules(prev=>({...prev,[rule.id]:rule.turns}));
     setShowRuleModal(false);soundService.spellCast?.();setEnergyOrbs(o=>Math.max(0,o-2));
     addLog(`🔀 KURAL: ${rule.emoji} ${rule.name} (${rule.turns} tur)!`);
+    setTurnTimeLeft(TURN_TIME);
   };
 
   const handleSquareClick=(r,c)=>{
     if(!isPlaying||gameOver||playerTurn!==playerColor||pendingPromotion) return;
     const key=`${r}-${c}`,piece=board[r][c];
     if(activeSpell){handleApplySpell(r,c,key);return;}
+    if(piece&&piece.startsWith(playerColor)&&frozenPieces[key]>0){
+      soundService.error?.();
+      addLog(`❄️ Bu ${PIECES[piece]} taşı ${frozenPieces[key]} tur dondurulmuştur, hareket edemez!`);
+      return;
+    }
     if(selectedPos){
       const[sr,sc]=selectedPos;
       if(sr===r&&sc===c){setSelectedPos(null);setValidMoves([]);return;}
@@ -942,18 +976,18 @@ export default function KuantumSatranc({onGameComplete}){
               <span style={{color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.35rem'}}>
                 Taşınız: 
                 <strong style={{
-                  color: playerColor === 'w' ? '#38bdf8' : '#e2e8f0',
-                  background: playerColor === 'w' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255, 255, 255, 0.12)',
+                  color: playerColor === 'w' ? '#fbbf24' : '#f5f5f4',
+                  background: playerColor === 'w' ? 'rgba(251, 191, 36, 0.15)' : 'rgba(255, 255, 255, 0.12)',
                   padding: '0.15rem 0.45rem',
                   borderRadius: '4px',
-                  border: `1px solid ${playerColor === 'w' ? 'rgba(56, 189, 248, 0.3)' : 'rgba(255, 255, 255, 0.2)'}`
+                  border: `1px solid ${playerColor === 'w' ? 'rgba(251, 191, 36, 0.4)' : 'rgba(255, 255, 255, 0.2)'}`
                 }}>
                   {playerColor === 'w' ? '⚪ Beyaz (♔)' : '⚫ Siyah (♚)'}
                 </strong>
               </span>
               <span style={{
                 fontWeight: '800',
-                color: playerTurn === playerColor ? '#10b981' : '#f59e0b',
+                color: playerTurn === playerColor ? '#16a34a' : '#f59e0b',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '0.35rem'
@@ -962,15 +996,15 @@ export default function KuantumSatranc({onGameComplete}){
               </span>
             </div>
 
-            {/* YÜKSEK KONTRASTLI SATRANÇ TAHTASI */}
+            {/* YÜKSEK KONTRASTLI KLASİK CEVİZ & KREM SATRANÇ TAHTASI (MAVİ YOK) */}
             <div style={{
               display:'grid',
               gridTemplateColumns:'repeat(8,1fr)',
               gap:'2px',
-              background:'#0f172a',
+              background:'#292524',
               padding:'8px',
               borderRadius:'var(--radius-lg)',
-              border:isPlayerInCheck?'2px solid rgba(239,68,68,0.8)':'2px solid rgba(255,255,255,0.18)',
+              border:isPlayerInCheck?'2px solid rgba(239,68,68,0.9)':'2px solid #57534e',
               marginBottom:'0.7rem',
               boxShadow:isPlayerInCheck?'0 0 20px rgba(239,68,68,0.4)':'0 12px 35px rgba(0,0,0,0.6)',
               transition:'border-color 0.3s'
@@ -982,24 +1016,24 @@ export default function KuantumSatranc({onGameComplete}){
                 const isDark=(r+c)%2===1;
                 const isSel=selectedPos?.[0]===r&&selectedPos?.[1]===c;
                 const isTarget=validMoves.some(([vr,vc])=>vr===r&&vc===c);
-                const isShielded=shieldedSquares.has(ck);
+                const isShielded=Boolean(cell && shieldedSquares.has(ck));
                 const isKingChk=ck===playerKingKey&&isPlayerInCheck;
-                const isFrozen=frozenPieces[ck]&&frozenPieces[ck]>0;
+                const isFrozen=Boolean(cell && frozenPieces[ck]&&frozenPieces[ck]>0);
                 const isLast=lastMove&&((lastMove.fr===r&&lastMove.fc===c)||(lastMove.tr===r&&lastMove.tc===c));
 
-                // High Contrast Theme: Crisp Light Slate (#cbd5e1) vs Deep Slate (#334155)
-                let bg = isDark ? '#334155' : '#cbd5e1';
+                // Yüksek Kontrastlı Klasik Ahşap Paleti (Ceviz & Krem - MAVİ KESİNLİKLE YOK)
+                let bg = isDark ? '#b58863' : '#f0d9b5';
                 if(isKingChk) bg='#ef4444';
-                else if(isFrozen) bg='#38bdf8';
-                else if(isSel) bg='#0284c7';
-                else if(isLast) bg=isDark ? '#4338ca' : '#a5b4fc';
+                else if(isFrozen) bg='rgba(255, 255, 255, 0.85)';
+                else if(isSel) bg='#f59e0b';
+                else if(isLast) bg=isDark ? '#9a6b47' : '#fde68a';
 
-                // High clarity text styling for pieces
+                // Taşlar için net okunabilir gölge ve kontur
                 const isPieceWhite = cell && cell.startsWith('w');
-                const pieceColor = isPieceWhite ? '#ffffff' : '#090d16';
+                const pieceColor = isPieceWhite ? '#ffffff' : '#171717';
                 const pieceShadow = isPieceWhite
-                  ? '0 2px 4px rgba(0,0,0,0.9), 0 0 2px #000, 0 0 4px #000'
-                  : '0 1px 2px rgba(255,255,255,0.9), 0 0 2px #ffffff, 0 0 3px #ffffff';
+                  ? '0 2px 5px rgba(0,0,0,0.95), 0 0 2px #000, 0 0 4px #000'
+                  : '0 1px 2px rgba(255,255,255,0.95), 0 0 1px #fff, 0 0 3px #ffffff';
 
                 return(
                   <div 
@@ -1011,14 +1045,14 @@ export default function KuantumSatranc({onGameComplete}){
                       display:'flex',
                       alignItems:'center',
                       justifyContent:'center',
-                      fontSize:'2.15rem',
+                      fontSize:'2.2rem',
                       cursor:'pointer',
                       borderRadius:'3px',
                       position:'relative',
                       userSelect:'none',
                       transition:'all 0.12s',
-                      boxShadow:isKingChk?'0 0 12px #ef4444':isShielded?'0 0 10px #10b981':isFrozen?'0 0 10px #38bdf8':'none',
-                      border:isShielded?'2px solid #10b981':isFrozen?'2px solid #38bdf8':'1px solid rgba(0,0,0,0.1)'
+                      boxShadow:isKingChk?'0 0 12px #ef4444':isShielded?'0 0 12px rgba(234, 88, 12, 0.85)':isFrozen?'0 0 10px rgba(255, 255, 255, 0.8)':'none',
+                      border:isShielded?'2.5px solid #ea580c':isFrozen?'2.5px solid #94a3b8':isSel?'2.5px solid #b45309':isLast?'2px solid #d97706':'1px solid rgba(0,0,0,0.08)'
                     }}
                   >
                     {isTarget&&(
@@ -1027,9 +1061,9 @@ export default function KuantumSatranc({onGameComplete}){
                         width:cell?'90%':'28%',
                         height:cell?'90%':'28%',
                         borderRadius:cell?'4px':'50%',
-                        background:cell?'rgba(239, 68, 68, 0.35)':'#10b981',
-                        border:cell?'3px solid #ef4444':'none',
-                        boxShadow:cell?'0 0 8px rgba(239, 68, 68, 0.7)':'0 0 8px #10b981',
+                        background:cell?'rgba(220, 38, 38, 0.3)':'#16a34a',
+                        border:cell?'3.5px solid #dc2626':'none',
+                        boxShadow:cell?'0 0 10px rgba(220, 38, 38, 0.8)':'0 0 8px #16a34a',
                         pointerEvents:'none',
                         zIndex:1
                       }}/>
@@ -1043,8 +1077,8 @@ export default function KuantumSatranc({onGameComplete}){
                     }}>
                       {cell&&PIECES[cell]}
                     </span>
-                    {isShielded&&<div style={{position:'absolute',top:'1px',right:'2px',fontSize:'0.55rem',zIndex:3}} title="Kalkan Koruma">🛡️</div>}
-                    {isFrozen&&<div style={{position:'absolute',top:'1px',left:'2px',fontSize:'0.55rem',zIndex:3}} title="Donduruldu">❄️</div>}
+                    {isShielded&&<div style={{position:'absolute',top:'1px',right:'2px',fontSize:'0.65rem',zIndex:3,filter:'drop-shadow(0 0 2px #ea580c)'}} title="Kalkan Koruma">🛡️</div>}
+                    {isFrozen&&<div style={{position:'absolute',top:'1px',left:'2px',fontSize:'0.65rem',zIndex:3,filter:'drop-shadow(0 0 2px #94a3b8)'}} title="Donduruldu">❄️</div>}
                   </div>
                 );
               }))}
